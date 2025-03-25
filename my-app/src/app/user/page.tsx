@@ -14,7 +14,11 @@ interface ContraCheque {
   year: number;
   fileUrl: string;
 }
-
+interface contra{
+  fileUrl: string;
+  year: number;
+  month: number;
+}
 const UserDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -55,7 +59,7 @@ const UserDashboard = () => {
       // Verificar se a resposta é um array
       if (Array.isArray(response.data)) {
         // Armazenar os contra-cheques completos
-        const contraChequesList = response.data as ContraCheque[];
+        const contraChequesList = response.data as any[];
         setContraCheques(contraChequesList);
         
         // Garantir que todos os contra-cheques tenham year e month válidos
@@ -63,12 +67,12 @@ const UserDashboard = () => {
           cc && typeof cc.year === 'number' && typeof cc.month === 'number');
 
         // Extrair anos únicos
-        const uniqueYears = [...new Set(validContraCheques.map(cc => cc.year))];
+        const uniqueYears: any[] = [...new Set(validContraCheques.map(cc => cc.year))];
         // Ordenar anos em ordem decrescente (mais recente primeiro)
         const sortedYears = uniqueYears.sort((a, b) => b - a);
 
         // Extrair meses únicos
-        const uniqueMonths = [...new Set(validContraCheques.map(cc => cc.month))];
+        const uniqueMonths: any[] = [...new Set(validContraCheques.map(cc => cc.month))];
 
         
         console.log('Anos extraídos:', sortedYears);
@@ -124,53 +128,64 @@ const UserDashboard = () => {
     setError('');
   
     try {
-      // Encontrar o contra-cheque correspondente ao ano e mês selecionados
+      const yearNum = selectedYear;
+      const monthNum = selectedMonth;
+      
+      console.log('Buscando contra-cheque para:', { yearNum, monthNum });
+      
+      if (!contraCheques || contraCheques.length === 0) {
+        throw new Error('Nenhum contra-cheque disponível');
+      }
+      
       const selectedContraCheque = contraCheques.find(
-        cc => cc.year === selectedYear && cc.month === selectedMonth
+        cc => cc.year === yearNum && cc.month === monthNum
       );
   
       if (!selectedContraCheque) {
         throw new Error('Contra-cheque não encontrado para o período selecionado');
       }
   
-      // Extrair apenas o fileUrl do contra-cheque selecionado
+      // Verificar se o objeto tem a propriedade fileUrl e se ela é uma string válida
       const fileUrl = selectedContraCheque.fileUrl;
+      if (!fileUrl || typeof fileUrl !== 'string' || fileUrl.trim() === '') {
+        console.error('Propriedade fileUrl não encontrada ou inválida no objeto:', selectedContraCheque);
+        throw new Error('Estrutura do contra-cheque inválida ou URL do arquivo não encontrada');
+      }
+      
       console.log(`Baixando contra-cheque: ${fileUrl}`);
       
       const cookies = parseCookies();
       const token = cookies.auth_token;
   
-      // Fazer requisição para baixar o arquivo usando a URL do arquivo
       const response = await axios.get<any>(`http://localhost:3001/contra-cheques`, {
         params: {
-          fileUrl: fileUrl
+          fileUrl: fileUrl,
+          year: yearNum,
+          month: monthNum
         },
         headers: {
           Authorization: `Bearer ${token}`
         },
-        responseType: 'blob' // Para baixar o arquivo
+        responseType: 'blob'
       });
   
-      console.log('Contra-cheque recebido, iniciando download...');
-      
-      // Criar um URL para o blob e iniciar o download
+      console.log('Resposta da requisição:', response);
+  
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      
-      // Extrair o nome do arquivo da URL
-      const fileName = fileUrl.split('\\').pop() || 
-                      `contracheque_${selectedYear}_${selectedMonth}.pdf`;
-      
+  
+      const fileName = fileUrl.split('\\').pop() || `contracheque-${yearNum}-${monthNum}.pdf`;
+  
       link.setAttribute('download', fileName);
       document.body.appendChild(link);
       link.click();
       link.remove();
-      
+  
       console.log('Download iniciado com sucesso');
     } catch (err: any) {
       console.error('Erro ao baixar contra-cheque:', err);
-      
+  
       if (err.response?.status === 401) {
         setError('Sessão expirada. Por favor, faça login novamente.');
         router.push('/');
@@ -182,6 +197,7 @@ const UserDashboard = () => {
       setGenerating(false);
     }
   };
+  
   
 
   // Carregar os contra-cheques disponíveis quando o componente montar
