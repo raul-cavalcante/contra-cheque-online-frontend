@@ -54,46 +54,6 @@ const UserDashboard = () => {
     }
   };
 
-  // Função para buscar o caminho do arquivo
-  const fetchFilePath = async () => {
-    if (!selectedYear || !selectedMonth) {
-      setError('Selecione um ano e um mês');
-      return;
-    }
-
-    setError('');
-    setFilePath(null);
-
-    try {
-      const cookies = parseCookies();
-      const token = cookies.auth_token;
-
-      const response = await axios.get('http://localhost:3001/contra-cheques', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      const data = response.data;
-      if (Array.isArray(data)) {
-        const selectedFile = data.find(
-          (item) => item.year === selectedYear && item.month === selectedMonth
-        );
-
-        if (selectedFile && selectedFile.fileUrl) {
-          setFilePath(selectedFile.fileUrl);
-        } else {
-          setError('Arquivo não encontrado para o período selecionado');
-        }
-      } else {
-        throw new Error('Formato de resposta inválido');
-      }
-    } catch (err: any) {
-      console.error(err);
-      setError('Erro ao buscar o caminho do arquivo');
-    }
-  };
-
   useEffect(() => {
     fetchYearMonth();
   }, []);
@@ -193,29 +153,58 @@ const UserDashboard = () => {
                 </div>
               </div>
 
-              {/* Botão para buscar o caminho do arquivo */}
-              <div className="flex justify-center mt-6">
-                <button
-                  onClick={fetchFilePath}
-                  disabled={!selectedYear || !selectedMonth}
-                  className="bg-blue-600 text-white py-2 px-6 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:bg-blue-300"
-                >
-                  Buscar Caminho do Arquivo
-                </button>
-              </div>
-
               {/* Botão para baixar o arquivo */}
               <div className="flex justify-center mt-6">
                 <button
-                  onClick={() => {
-                    if (filePath) {
-                      const link = document.createElement('a');
-                      link.href = `http://localhost:3001/${filePath}`;
-                      link.download = filePath.split('\\').pop() || `${selectedYear}-${selectedMonth}.pdf`;
-                      link.click();
+                  onClick={async () => {
+                    if (selectedYear && selectedMonth) {
+                      try {
+                        setError('');
+                        setLoading(true);
+
+                        const cookies = parseCookies();
+                        const token = cookies.auth_token;
+
+                        if (!token) {
+                          setError('Usuário não autenticado');
+                          router.push('/');
+                          return;
+                        }
+
+                        const response = await axios.get('http://localhost:3001/contra-cheques', {
+                          headers: {
+                            Authorization: `Bearer ${token}`,
+                          },
+                        });
+
+                        const data = response.data;
+                        if (Array.isArray(data)) {
+                          const selectedFile = data.find(
+                            (item) => item.year === selectedYear && item.month === selectedMonth
+                          );
+
+                          if (selectedFile && selectedFile.fileUrl) {
+                            const link = document.createElement('a');
+                            link.href = `http://localhost:3001/${selectedFile.fileUrl}`;
+                            link.download = selectedFile.fileUrl.split('/').pop() || `${selectedYear}-${selectedMonth}.pdf`;
+                            link.click();
+                          } else {
+                            setError('Arquivo não encontrado para o período selecionado');
+                          }
+                        } else {
+                          setError('Formato de resposta inválido');
+                        }
+                      } catch (err: any) {
+                        console.error(err);
+                        setError('Erro ao buscar o arquivo');
+                      } finally {
+                        setLoading(false);
+                      }
+                    } else {
+                      setError('Selecione um ano e um mês');
                     }
                   }}
-                  disabled={!filePath}
+                  disabled={!selectedYear || !selectedMonth}
                   className="bg-blue-600 text-white py-2 px-6 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:bg-blue-300"
                 >
                   Baixar Arquivo

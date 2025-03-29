@@ -10,6 +10,7 @@ const DashboardPage = () => {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const validateAuth = async () => {
@@ -54,9 +55,11 @@ const DashboardPage = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true); // Inicia o estado de carregamento
 
     if (!year || !month || !file) {
       setError('Todos os campos são obrigatórios.');
+      setLoading(false); // Finaliza o estado de carregamento
       return;
     }
 
@@ -83,6 +86,8 @@ const DashboardPage = () => {
     } catch (err: any) {
       setError(err.response?.data?.message || 'Erro ao enviar o arquivo.');
       setSuccess('');
+    } finally {
+      setLoading(false); // Finaliza o estado de carregamento
     }
   };
 
@@ -152,9 +157,10 @@ const DashboardPage = () => {
 
           <button
             type="submit"
-            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+            className={`w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={loading}
           >
-            Enviar
+            {loading ? 'Enviando...' : 'Enviar'}
           </button>
         </form>
       </div>
