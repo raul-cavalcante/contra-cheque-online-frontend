@@ -159,7 +159,7 @@ const UserDashboard = () => {
       link.href = url;
       
       // Extrair o nome do arquivo da URL
-      const fileName = fileUrl.split('\\').pop() || 
+      const fileName = fileUrl.split('/').pop() || 
                       `contracheque_${selectedYear}_${selectedMonth}.pdf`;
       
       link.setAttribute('download', fileName);
