@@ -14,6 +14,15 @@ const UserDashboard = () => {
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [filePath, setFilePath] = useState<string | null>(null);
   const router = useRouter();
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Função para obter os anos e meses disponíveis
   const fetchYearMonth = async () => {
@@ -58,6 +67,45 @@ const UserDashboard = () => {
     fetchYearMonth();
   }, []);
 
+  const handleChangePassword = async () => {
+    if (newPassword !== confirmPassword) {
+      setPasswordError('As senhas não coincidem');
+      return;
+    }
+
+    try {
+      setPasswordError('');
+      const cookies = parseCookies();
+      const token = cookies.auth_token;
+
+      if (!token) {
+        setError('Usuário não autenticado');
+        router.push('/');
+        return;
+      }
+
+      await axios.put(
+        'http://localhost:3001/user',
+        { currentPassword, newPassword },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      setSuccessMessage('Sua senha foi atualizada com sucesso');
+      setTimeout(() => setSuccessMessage(''), 3000);
+      setShowChangePasswordModal(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      console.error(err);
+      setPasswordError('Erro ao alterar a senha');
+    }
+  };
+
   const monthNames = [
     'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
     'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
@@ -69,17 +117,120 @@ const UserDashboard = () => {
       <header className="bg-blue-600 text-white p-4 shadow-md">
         <div className="container mx-auto flex justify-between items-center">
           <h1 className="text-2xl font-bold">Contra-Cheque Online</h1>
-          <button
-            onClick={() => {
-              document.cookie = "auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-              router.push('/');
-            }}
-            className="bg-blue-700 hover:bg-blue-800 px-4 py-2 rounded-md transition-colors"
-          >
-            Sair
-          </button>
+          <div className="flex space-x-4">
+            <button
+              onClick={() => setShowChangePasswordModal(true)}
+              className="bg-orange-500 hover:bg-orange-600 px-4 py-2 rounded-md transition-colors"
+            >
+              Alterar Senha
+            </button>
+            <button
+              onClick={() => {
+                document.cookie = "auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+                router.push('/');
+              }}
+              className="text-white border border-white px-4 py-2 rounded-md hover:bg-red-600 transition-colors"
+            >
+              Sair
+            </button>
+          </div>
         </div>
       </header>
+
+      {/* Modal de Alteração de Senha */}
+      {showChangePasswordModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
+            <h2 className="text-xl font-semibold mb-4">Alterar Senha</h2>
+            {passwordError && (
+              <div className="mb-4 p-2 bg-red-100 text-red-700 rounded-md">
+                {passwordError}
+              </div>
+            )}
+            {successMessage && (
+              <div className="mb-4 p-2 bg-green-100 text-black rounded-md">
+                {successMessage}
+              </div>
+            )}
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Senha Atual
+                </label>
+                <div className="relative">
+                  <input
+                    type={showCurrentPassword ? 'text' : 'password'}
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    className="absolute inset-y-0 right-2 text-gray-500"
+                  >
+                    {showCurrentPassword ? '👁️' : '🙈'}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nova Senha
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute inset-y-0 right-2 text-gray-500"
+                  >
+                    {showNewPassword ? '👁️' : '🙈'}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Confirmar Nova Senha
+                </label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute inset-y-0 right-2 text-gray-500"
+                  >
+                    {showConfirmPassword ? '👁️' : '🙈'}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-4 mt-6">
+              <button
+                onClick={() => setShowChangePasswordModal(false)}
+                className="bg-gray-300 hover:bg-gray-400 px-4 py-2 rounded-md transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleChangePassword}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Alterar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="container mx-auto py-8 px-4">
