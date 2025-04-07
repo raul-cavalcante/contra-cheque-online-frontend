@@ -17,21 +17,17 @@ const DashboardPage = () => {
       const { auth_token } = parseCookies();
 
       if (!auth_token) {
-        console.log('Token ausente. Redirecionando para /admin.');
         window.location.href = '/admin';
         return;
       }
 
       try {
-        console.log('Validando token:', auth_token);
         // await axios.get('http://localhost:3001/validate-token', {
         //   headers: {
         //     Authorization: `Bearer ${auth_token}`,
         //   },
         // });
-        console.log('Token válido.');
       } catch (err) {
-        console.error('Erro ao validar o token:', err);
         destroyCookie(null, 'auth_token');
         window.location.href = '/admin';
       }
@@ -55,11 +51,11 @@ const DashboardPage = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true); // Inicia o estado de carregamento
+    setLoading(true);
 
     if (!year || !month || !file) {
       setError('Todos os campos são obrigatórios.');
-      setLoading(false); // Finaliza o estado de carregamento
+      setLoading(false);
       return;
     }
 
@@ -71,7 +67,7 @@ const DashboardPage = () => {
     try {
       const { auth_token } = parseCookies();
 
-      const response = await axios.post('http://localhost:3001/upload/payroll', formData, {
+      await axios.post('http://localhost:3001/upload/payroll', formData, {
         headers: {
           Authorization: `Bearer ${auth_token}`,
           'Content-Type': 'multipart/form-data',
@@ -87,7 +83,7 @@ const DashboardPage = () => {
       setError(err.response?.data?.message || 'Erro ao enviar o arquivo.');
       setSuccess('');
     } finally {
-      setLoading(false); // Finaliza o estado de carregamento
+      setLoading(false);
     }
   };
 
@@ -97,19 +93,20 @@ const DashboardPage = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 text-black relative">
-      <button
-        onClick={handleLogout}
-        className="absolute top-4 right-4 bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors"
-      >
-        Sair
-      </button>
-      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
+    <div className="min-h-screen flex flex-col items-center bg-gray-100 text-black">
+      <header className="w-full bg-blue-600 text-white py-4 px-6 flex justify-between items-center fixed top-0 left-0">
+        <h1 className="text-xl font-bold">Painel Administrativo - Upload de Contra-Cheque</h1>
+        <button
+          onClick={handleLogout}
+          className="bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors"
+        >
+          Sair
+        </button>
+      </header>
+      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md mt-20">
         <h1 className="text-2xl font-bold mb-6 text-center">Upload de Contra-Cheque</h1>
-
         {error && <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md text-sm">{error}</div>}
         {success && <div className="mb-4 p-3 bg-green-100 text-green-700 rounded-md text-sm">{success}</div>}
-
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label htmlFor="year" className="block text-sm font-medium mb-2">
@@ -125,7 +122,6 @@ const DashboardPage = () => {
               required
             />
           </div>
-
           <div className="mb-4">
             <label htmlFor="month" className="block text-sm font-medium mb-2">
               Mês
@@ -140,7 +136,6 @@ const DashboardPage = () => {
               required
             />
           </div>
-
           <div className="mb-4">
             <label htmlFor="file" className="block text-sm font-medium mb-2">
               Arquivo PDF
@@ -154,12 +149,33 @@ const DashboardPage = () => {
               required
             />
           </div>
-
           <button
             type="submit"
-            className={`w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors flex items-center justify-center ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
             disabled={loading}
           >
+            {loading ? (
+              <svg
+                className="animate-spin h-5 w-5 text-white mr-2"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                ></circle>
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+            ) : null}
             {loading ? 'Enviando...' : 'Enviar'}
           </button>
         </form>

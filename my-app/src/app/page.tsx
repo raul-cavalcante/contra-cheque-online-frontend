@@ -152,9 +152,7 @@ const Page = () => {
           </div>
           
           <div className="mb-6 text-right">
-            <Link href="/esqueci-senha" className="text-sm text-blue-600 hover:underline">
-              Esqueci minha senha
-            </Link>
+            {/* Removido o link "Esqueci minha senha" */}
           </div>
           
           <button
@@ -167,12 +165,7 @@ const Page = () => {
         </form>
         
         <div className="mt-6 text-center text-sm">
-          <p className="text-black">
-            Primeiro acesso?{' '}
-            <Link href="/cadastro" className="text-blue-600 hover:underline">
-              Cadastre-se aqui
-            </Link>
-          </p>
+          {/* Removido o texto "Primeiro acesso? Cadastre-se aqui" */}
         </div>
       </div>
     </div>

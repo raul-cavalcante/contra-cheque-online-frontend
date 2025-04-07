@@ -336,7 +336,7 @@ const UserDashboard = () => {
 
                           if (selectedFile && selectedFile.fileUrl) {
                             const link = document.createElement('a');
-                            link.href = `http://localhost:3001/${selectedFile.fileUrl}`;
+                            link.href = selectedFile.fileUrl;
                             link.download = selectedFile.fileUrl.split('/').pop() || `${selectedYear}-${selectedMonth}.pdf`;
                             link.click();
                           } else {
