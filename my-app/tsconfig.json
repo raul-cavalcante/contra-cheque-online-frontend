@@ -1,5 +1,7 @@
 {
   "compilerOptions": {
+    "target": "es2015", // Define o target como ES2015 para suportar recursos modernos
+    "downlevelIteration": true, // Habilita a iteração sobre objetos como Set e Map
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
