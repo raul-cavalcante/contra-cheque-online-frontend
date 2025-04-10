@@ -11,10 +11,9 @@ interface Admin {
   password: string;
 }
 
-// Atualize o estado com o tipo correto
-const [admins, setAdmins] = useState<Admin[]>([]);
-
 const DashboardPage = () => {
+  // Mover a declaração de useState para dentro do componente
+  const [admins, setAdmins] = useState<Admin[]>([]);
   const [year, setYear] = useState('');
   const [month, setMonth] = useState('');
   const [file, setFile] = useState<File | null>(null);
