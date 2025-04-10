@@ -4,6 +4,16 @@ import { useState, useEffect } from 'react';
 import { parseCookies, destroyCookie } from 'nookies';
 import axios from 'axios';
 
+// Defina o tipo para os administradores
+interface Admin {
+  id: string;
+  email: string;
+  password: string;
+}
+
+// Atualize o estado com o tipo correto
+const [admins, setAdmins] = useState<Admin[]>([]);
+
 const DashboardPage = () => {
   const [year, setYear] = useState('');
   const [month, setMonth] = useState('');
@@ -11,7 +21,6 @@ const DashboardPage = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
-  const [admins, setAdmins] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [newAdminPassword, setNewAdminPassword] = useState('');
@@ -56,7 +65,7 @@ const DashboardPage = () => {
     const fetchAdmins = async () => {
       try {
         const { auth_token } = parseCookies();
-        const response = await axios.get('https://api-contra-cheque-online.vercel.app/master', {
+        const response = await axios.get <any>('https://api-contra-cheque-online.vercel.app/master', {
           headers: {
             Authorization: `Bearer ${auth_token}`,
           },
@@ -139,7 +148,7 @@ const DashboardPage = () => {
       setActionMessage('Admin criado com sucesso!');
       setTimeout(() => setActionMessage(''), 3000); // Remove a mensagem após 3 segundos
       // Atualiza a lista de admins
-      const response = await axios.get('https://api-contra-cheque-online.vercel.app/master', {
+      const response = await axios.get <any>('https://api-contra-cheque-online.vercel.app/master', {
         headers: {
           Authorization: `Bearer ${auth_token}`,
         },
@@ -167,7 +176,7 @@ const DashboardPage = () => {
       setActionMessage('Admin(s) deletado(s) com sucesso!');
       setTimeout(() => setActionMessage(''), 3000); // Remove a mensagem após 3 segundos
       // Atualiza a lista de admins
-      const response = await axios.get('https://api-contra-cheque-online.vercel.app/master', {
+      const response = await axios.get <any>('https://api-contra-cheque-online.vercel.app/master', {
         headers: {
           Authorization: `Bearer ${auth_token}`,
         },

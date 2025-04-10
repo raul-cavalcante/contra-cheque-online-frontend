@@ -4,6 +4,13 @@ import { useState, useEffect } from 'react';
 import { parseCookies, destroyCookie } from 'nookies';
 import axios from 'axios';
 
+// Defina o tipo para os administradores
+interface Admin {
+  id: string;
+  email: string;
+  password: string;
+}
+
 const DashboardPage = () => {
   const [year, setYear] = useState('');
   const [month, setMonth] = useState('');
@@ -11,6 +18,8 @@ const DashboardPage = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  // Atualize o estado com o tipo correto
+  const [admins, setAdmins] = useState<Admin[]>([]);
 
   useEffect(() => {
     const validateAuth = async () => {

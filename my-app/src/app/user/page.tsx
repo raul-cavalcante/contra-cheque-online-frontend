@@ -5,6 +5,13 @@ import axios from 'axios';
 import { parseCookies } from 'nookies';
 import { useRouter } from 'next/navigation';
 
+// Defina o tipo para os administradores
+interface Admin {
+  id: string;
+  email: string;
+  password: string;
+}
+
 const UserDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -23,6 +30,8 @@ const UserDashboard = () => {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  // Atualize o estado com o tipo correto
+  const [admins, setAdmins] = useState<Admin[]>([]);
 
   // Função para obter os anos e meses disponíveis
   const fetchYearMonth = async () => {
