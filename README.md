@@ -1,1 +1,0 @@
-# contra-cheque-online-frontend
