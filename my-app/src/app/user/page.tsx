@@ -39,7 +39,7 @@ const UserDashboard = () => {
         return;
       }
 
-      const response = await axios.get('http://localhost:3001/yearMonth', {
+      const response = await axios.get('https://api-contra-cheque-online.vercel.app/yearMonth', {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -85,7 +85,7 @@ const UserDashboard = () => {
       }
 
       await axios.put(
-        'http://localhost:3001/user',
+        'https://api-contra-cheque-online.vercel.app/user',
         { currentPassword, newPassword },
         {
           headers: {
@@ -322,7 +322,7 @@ const UserDashboard = () => {
                           return;
                         }
 
-                        const response = await axios.get('http://localhost:3001/contra-cheques', {
+                        const response = await axios.get('https://api-contra-cheque-online.vercel.app/contra-cheques', {
                           headers: {
                             Authorization: `Bearer ${token}`,
                           },

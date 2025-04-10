@@ -22,7 +22,7 @@ const DashboardPage = () => {
       }
 
       try {
-        // await axios.get('http://localhost:3001/validate-token', {
+        // await axios.get('https://api-contra-cheque-online.vercel.app/validate-token', {
         //   headers: {
         //     Authorization: `Bearer ${auth_token}`,
         //   },
@@ -67,7 +67,7 @@ const DashboardPage = () => {
     try {
       const { auth_token } = parseCookies();
 
-      await axios.post('http://localhost:3001/upload/payroll', formData, {
+      await axios.post('https://api-contra-cheque-online.vercel.app/upload/payroll', formData, {
         headers: {
           Authorization: `Bearer ${auth_token}`,
           'Content-Type': 'multipart/form-data',

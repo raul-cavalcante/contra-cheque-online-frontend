@@ -39,7 +39,7 @@ const AdminLoginPage = () => {
       setError('');
       
       // Fazendo a requisição POST com axios
-      const response = await axios.post<authResponse>('http://localhost:3001/login/admin', {
+      const response = await axios.post<authResponse>('https://api-contra-cheque-online.vercel.app/login/admin', {
         email,
         password
       });

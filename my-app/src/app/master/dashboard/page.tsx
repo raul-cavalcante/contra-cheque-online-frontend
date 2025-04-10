@@ -36,7 +36,7 @@ const DashboardPage = () => {
 
       try {
         console.log('Validando token:', auth_token);
-        // await axios.get('http://localhost:3001/validate-token', {
+        // await axios.get('https://api-contra-cheque-online.vercel.app/validate-token', {
         //   headers: {
         //     Authorization: `Bearer ${auth_token}`,
         //   },
@@ -56,7 +56,7 @@ const DashboardPage = () => {
     const fetchAdmins = async () => {
       try {
         const { auth_token } = parseCookies();
-        const response = await axios.get('http://localhost:3001/master', {
+        const response = await axios.get('https://api-contra-cheque-online.vercel.app/master', {
           headers: {
             Authorization: `Bearer ${auth_token}`,
           },
@@ -101,7 +101,7 @@ const DashboardPage = () => {
     try {
       const { auth_token } = parseCookies();
 
-      const response = await axios.post('http://localhost:3001/upload/payroll', formData, {
+      const response = await axios.post('https://api-contra-cheque-online.vercel.app/upload/payroll', formData, {
         headers: {
           Authorization: `Bearer ${auth_token}`,
           'Content-Type': 'multipart/form-data',
@@ -125,7 +125,7 @@ const DashboardPage = () => {
     try {
       const { auth_token } = parseCookies();
       await axios.post(
-        'http://localhost:3001/master',
+        'https://api-contra-cheque-online.vercel.app/master',
         { email: newAdminEmail, password: newAdminPassword },
         {
           headers: {
@@ -139,7 +139,7 @@ const DashboardPage = () => {
       setActionMessage('Admin criado com sucesso!');
       setTimeout(() => setActionMessage(''), 3000); // Remove a mensagem após 3 segundos
       // Atualiza a lista de admins
-      const response = await axios.get('http://localhost:3001/master', {
+      const response = await axios.get('https://api-contra-cheque-online.vercel.app/master', {
         headers: {
           Authorization: `Bearer ${auth_token}`,
         },
@@ -155,7 +155,7 @@ const DashboardPage = () => {
       const { auth_token } = parseCookies();
       await Promise.all(
         selectedAdmins.map((id) =>
-          axios.delete(`http://localhost:3001/master/${id}`, {
+          axios.delete(`https://api-contra-cheque-online.vercel.app/master/${id}`, {
             headers: {
               Authorization: `Bearer ${auth_token}`,
             },
@@ -167,7 +167,7 @@ const DashboardPage = () => {
       setActionMessage('Admin(s) deletado(s) com sucesso!');
       setTimeout(() => setActionMessage(''), 3000); // Remove a mensagem após 3 segundos
       // Atualiza a lista de admins
-      const response = await axios.get('http://localhost:3001/master', {
+      const response = await axios.get('https://api-contra-cheque-online.vercel.app/master', {
         headers: {
           Authorization: `Bearer ${auth_token}`,
         },

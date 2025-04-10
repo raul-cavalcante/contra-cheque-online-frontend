@@ -40,7 +40,7 @@ const AdminLoginPage = () => {
     setLoading(true);
 
     try {
-      const response = await axios.post<authResponse>('http://localhost:3001/login/admin', {
+      const response = await axios.post<authResponse>('https://api-contra-cheque-online.vercel.app/login/admin', {
         email,
         password,
       });
