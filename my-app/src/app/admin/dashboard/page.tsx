@@ -3,6 +3,16 @@
 import { useState, useEffect } from 'react';
 import { parseCookies, destroyCookie } from 'nookies';
 import axios from 'axios';
+import {
+  FILE_SIZE_THRESHOLD,
+  isLargeFile,
+  getPresignedUrl,
+  uploadToS3,
+  initiateS3Processing,
+  checkJobStatus,
+  uploadPayrollFile,
+  JobStatusResponse,
+} from '@/utils/s3Upload';
 
 // Defina o tipo para os administradores
 interface Admin {
@@ -18,6 +28,11 @@ const DashboardPage = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  // Estados para o processamento do upload
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<string | null>(null);
+  const [progress, setProgress] = useState<number>(0);
+  const [processResult, setProcessResult] = useState<object | null>(null);
   // Atualize o estado com o tipo correto
   const [admins, setAdmins] = useState<Admin[]>([]);
 
@@ -45,6 +60,46 @@ const DashboardPage = () => {
     validateAuth();
   }, []);
 
+  // Efeito para verificar o status do job periodicamente
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (jobId && jobStatus !== 'completed' && jobStatus !== 'failed') {
+      interval = setInterval(checkJobStatusPeriodically, 2000); // Verifica a cada 2 segundos
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [jobId, jobStatus]);
+
+  // Função para verificar o status do job
+  const checkJobStatusPeriodically = async () => {
+    if (!jobId) return;
+    
+    try {
+      const { auth_token } = parseCookies();
+      const jobStatusResponse = await checkJobStatus(jobId, auth_token);
+      
+      const { status, progress, result } = jobStatusResponse;
+      setJobStatus(status);
+      setProgress(progress);
+      
+      if (status === 'completed') {
+        setProcessResult(result);
+        setSuccess('Arquivo processado com sucesso!');
+        setLoading(false);
+      } else if (status === 'failed') {
+        setError('Falha no processamento do arquivo.');
+        setLoading(false);
+      }
+    } catch (err) {
+      console.error('Erro ao verificar status do job:', err);
+      setError('Erro ao verificar status do processamento.');
+      setLoading(false);
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
@@ -61,6 +116,12 @@ const DashboardPage = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setSuccess('');
+    setError('');
+    setJobId(null);
+    setJobStatus(null);
+    setProgress(0);
+    setProcessResult(null);
 
     if (!year || !month || !file) {
       setError('Todos os campos são obrigatórios.');
@@ -68,30 +129,51 @@ const DashboardPage = () => {
       return;
     }
 
-    const formData = new FormData();
-    formData.append('year', year);
-    formData.append('month', month);
-    formData.append('file', file);
-
     try {
       const { auth_token } = parseCookies();
+      
+      // Verifica se o arquivo é grande (maior que 4MB)
+      if (isLargeFile(file)) {
+        // 1. Obter URL pré-assinada para upload
+        const presignedUrlResponse = await getPresignedUrl(year, month, file.type, auth_token);
+        const { uploadUrl, fileKey } = presignedUrlResponse;
 
-      await axios.post('https://api-contra-cheque-online.vercel.app/upload/payroll', formData, {
-        headers: {
-          Authorization: `Bearer ${auth_token}`,
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+        // 2. Fazer upload direto para o S3
+        const uploadSuccess = await uploadToS3(uploadUrl, file);
+        if (!uploadSuccess) {
+          setError('Erro ao enviar o arquivo para o servidor de armazenamento.');
+          setLoading(false);
+          return;
+        }
 
-      setSuccess('Arquivo enviado com sucesso!');
-      setError('');
-      setYear('');
-      setMonth('');
-      setFile(null);
+        // 3. Iniciar processamento do arquivo
+        const newJobId = await initiateS3Processing(fileKey, year, month, auth_token);
+        if (newJobId) {
+          setJobId(newJobId);
+          setJobStatus('processing');
+          setSuccess('Arquivo enviado com sucesso! Processando...');
+        } else {
+          setError('Erro ao iniciar o processamento do arquivo.');
+          setLoading(false);
+        }
+      } else {
+        // Para arquivos pequenos, continua usando o método original
+        const uploadSuccess = await uploadPayrollFile(year, month, file, auth_token);
+        
+        if (uploadSuccess) {
+          setSuccess('Arquivo enviado com sucesso!');
+          setError('');
+          setYear('');
+          setMonth('');
+          setFile(null);
+        } else {
+          setError('Erro ao enviar o arquivo.');
+        }
+        setLoading(false);
+      }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Erro ao enviar o arquivo.');
       setSuccess('');
-    } finally {
       setLoading(false);
     }
   };
@@ -99,6 +181,26 @@ const DashboardPage = () => {
   const handleLogout = () => {
     destroyCookie(null, 'auth_token');
     window.location.href = '/admin';
+  };
+
+  // Renderizar a barra de progresso
+  const renderProgressBar = () => {
+    if (!jobId || !jobStatus) return null;
+    
+    return (
+      <div className="mt-4">
+        <div className="mb-2 flex justify-between">
+          <span className="text-sm font-medium">Processando...</span>
+          <span className="text-sm font-medium">{Math.round(progress)}%</span>
+        </div>
+        <div className="w-full bg-gray-200 rounded-full h-2.5">
+          <div 
+            className="bg-blue-600 h-2.5 rounded-full" 
+            style={{ width: `${progress}%` }}
+          ></div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -116,6 +218,7 @@ const DashboardPage = () => {
         <h1 className="text-2xl font-bold mb-6 text-center">Upload de Contra-Cheque</h1>
         {error && <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md text-sm">{error}</div>}
         {success && <div className="mb-4 p-3 bg-green-100 text-green-700 rounded-md text-sm">{success}</div>}
+        {renderProgressBar()}
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label htmlFor="year" className="block text-sm font-medium mb-2">
@@ -157,6 +260,11 @@ const DashboardPage = () => {
               accept="application/pdf"
               required
             />
+            {file && isLargeFile(file) && (
+              <p className="mt-1 text-xs text-blue-600">
+                Arquivo grande detectado. Será feito upload direto para armazenamento seguro.
+              </p>
+            )}
           </div>
           <button
             type="submit"
@@ -185,9 +293,18 @@ const DashboardPage = () => {
                 ></path>
               </svg>
             ) : null}
-            {loading ? 'Enviando...' : 'Enviar'}
+            {loading && !jobId ? 'Enviando...' : loading && jobId ? 'Processando...' : 'Enviar'}
           </button>
         </form>
+        
+        {processResult && (
+          <div className="mt-6 p-4 bg-blue-50 rounded-md">
+            <h3 className="font-medium text-blue-800 mb-2">Resultado do processamento:</h3>
+            <pre className="text-xs overflow-auto max-h-40 p-2 bg-white rounded border border-blue-200">
+              {JSON.stringify(processResult, null, 2)}
+            </pre>
+          </div>
+        )}
       </div>
     </div>
   );
