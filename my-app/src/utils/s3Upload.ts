@@ -30,6 +30,11 @@ export const isLargeFile = (file: File): boolean => {
   return file.size > FILE_SIZE_THRESHOLD;
 };
 
+// Validação do tipo de arquivo
+export const validateFileType = (file: File): boolean => {
+  return file.type === 'application/pdf';
+};
+
 // Obter URL pré-assinada para upload ao S3
 export const getPresignedUrl = async (
   year: number | string,
@@ -117,6 +122,75 @@ export const checkJobStatus = async (
   return response.data;
 };
 
+// Função principal para gerenciar todo o processo de upload
+export const handleFileUpload = async (
+  file: File,
+  year: number | string,
+  month: number | string,
+  authToken: string,
+  onProgress?: (progress: number) => void
+): Promise<{ success: boolean; message: string; jobId?: string }> => {
+  try {
+    // Validar tipo do arquivo
+    if (!validateFileType(file)) {
+      throw new Error('Apenas arquivos PDF são permitidos');
+    }
+
+    // Obter URL pré-assinada
+    const presignedData = await getPresignedUrl(year, month, file.type, authToken);
+    
+    // Fazer upload para S3
+    const uploadSuccess = await uploadToS3(presignedData.uploadUrl, file);
+    if (!uploadSuccess) {
+      throw new Error('Falha no upload do arquivo para o S3');
+    }
+
+    // Iniciar processamento
+    const jobId = await initiateS3Processing(
+      presignedData.fileKey,
+      year,
+      month,
+      authToken
+    );
+
+    if (!jobId) {
+      throw new Error('Falha ao iniciar o processamento do arquivo');
+    }
+
+    // Monitorar o status do processamento
+    let status: JobStatusResponse;
+    do {
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Espera 2 segundos entre verificações
+      status = await checkJobStatus(jobId, authToken);
+      
+      if (onProgress && status.progress) {
+        onProgress(status.progress);
+      }
+    } while (status.status === 'processing');
+
+    if (status.status === 'completed') {
+      return { 
+        success: true, 
+        message: 'Upload e processamento concluídos com sucesso',
+        jobId: status.jobId 
+      };
+    } else {
+      throw new Error('Falha no processamento do arquivo');
+    }
+
+  } catch (error) {
+    if (error instanceof Error) {
+      return { success: false, message: error.message };
+    }
+    return { success: false, message: 'Erro desconhecido durante o upload' };
+  }
+};
+
+// Função auxiliar para formato de progresso
+export const formatProgress = (progress: number): string => {
+  return `${Math.round(progress)}%`;
+};
+
 // Upload tradicional (para arquivos pequenos)
 export const uploadPayrollFile = async (
   year: number | string,
@@ -142,4 +216,4 @@ export const uploadPayrollFile = async (
     console.error('Erro no upload tradicional:', error);
     return false;
   }
-}; 
+};

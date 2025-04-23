@@ -12,6 +12,8 @@ import {
   checkJobStatus,
   uploadPayrollFile,
   JobStatusResponse,
+  handleFileUpload,
+  validateFileType,
 } from '@/utils/s3Upload';
 
 // Defina o tipo para os administradores
@@ -35,6 +37,8 @@ const DashboardPage = () => {
   const [processResult, setProcessResult] = useState<object | null>(null);
   // Atualize o estado com o tipo correto
   const [admins, setAdmins] = useState<Admin[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
     const validateAuth = async () => {
@@ -116,65 +120,45 @@ const DashboardPage = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setSuccess('');
-    setError('');
-    setJobId(null);
-    setJobStatus(null);
-    setProgress(0);
-    setProcessResult(null);
+    setIsUploading(true);
 
     if (!year || !month || !file) {
       setError('Todos os campos são obrigatórios.');
       setLoading(false);
+      setIsUploading(false);
       return;
     }
 
     try {
       const { auth_token } = parseCookies();
-      
-      // Verifica se o arquivo é grande (maior que 4MB)
-      if (isLargeFile(file)) {
-        // 1. Obter URL pré-assinada para upload
-        const presignedUrlResponse = await getPresignedUrl(year, month, file.type, auth_token);
-        const { uploadUrl, fileKey } = presignedUrlResponse;
+      if (!auth_token) {
+        throw new Error('Usuário não autenticado');
+      }
 
-        // 2. Fazer upload direto para o S3
-        const uploadSuccess = await uploadToS3(uploadUrl, file);
-        if (!uploadSuccess) {
-          setError('Erro ao enviar o arquivo para o servidor de armazenamento.');
-          setLoading(false);
-          return;
-        }
+      const result = await handleFileUpload(
+        file,
+        year,
+        month,
+        auth_token,
+        (progress) => setUploadProgress(progress)
+      );
 
-        // 3. Iniciar processamento do arquivo
-        const newJobId = await initiateS3Processing(fileKey, year, month, auth_token);
-        if (newJobId) {
-          setJobId(newJobId);
-          setJobStatus('processing');
-          setSuccess('Arquivo enviado com sucesso! Processando...');
-        } else {
-          setError('Erro ao iniciar o processamento do arquivo.');
-          setLoading(false);
-        }
+      if (result.success) {
+        setSuccess('Arquivo enviado com sucesso!');
+        setError('');
+        setYear('');
+        setMonth('');
+        setFile(null);
       } else {
-        // Para arquivos pequenos, continua usando o método original
-        const uploadSuccess = await uploadPayrollFile(year, month, file, auth_token);
-        
-        if (uploadSuccess) {
-          setSuccess('Arquivo enviado com sucesso!');
-          setError('');
-          setYear('');
-          setMonth('');
-          setFile(null);
-        } else {
-          setError('Erro ao enviar o arquivo.');
-        }
-        setLoading(false);
+        throw new Error(result.message);
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Erro ao enviar o arquivo.');
+      setError(err.message || 'Erro ao enviar o arquivo.');
       setSuccess('');
+    } finally {
       setLoading(false);
+      setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -256,44 +240,65 @@ const DashboardPage = () => {
               id="file"
               type="file"
               onChange={handleFileChange}
-              className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 
+                       file:rounded-md file:border-0 file:text-sm file:font-semibold 
+                       file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
               accept="application/pdf"
               required
+              disabled={isUploading}
             />
-            {file && isLargeFile(file) && (
-              <p className="mt-1 text-xs text-blue-600">
-                Arquivo grande detectado. Será feito upload direto para armazenamento seguro.
-              </p>
-            )}
           </div>
+
+          {isUploading && (
+            <div className="mb-4">
+              <div className="w-full bg-gray-200 rounded-full h-2.5">
+                <div
+                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                ></div>
+              </div>
+              <p className="text-sm text-gray-600 mt-2 text-center">
+                Upload em andamento: {uploadProgress}%
+              </p>
+            </div>
+          )}
+
           <button
             type="submit"
-            className={`w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors flex items-center justify-center ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-            disabled={loading}
+            className={`w-full bg-blue-600 text-white py-2 px-4 rounded-md 
+                       hover:bg-blue-700 focus:outline-none focus:ring-2 
+                       focus:ring-blue-500 focus:ring-offset-2 transition-colors 
+                       flex items-center justify-center
+                       ${(loading || isUploading) ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={loading || isUploading}
           >
-            {loading ? (
-              <svg
-                className="animate-spin h-5 w-5 text-white mr-2"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                ></circle>
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                ></path>
-              </svg>
-            ) : null}
-            {loading && !jobId ? 'Enviando...' : loading && jobId ? 'Processando...' : 'Enviar'}
+            {loading || isUploading ? (
+              <>
+                <svg
+                  className="animate-spin h-5 w-5 text-white mr-2"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
+                </svg>
+                {isUploading ? 'Enviando...' : 'Processando...'}
+              </>
+            ) : (
+              'Enviar'
+            )}
           </button>
         </form>
         
