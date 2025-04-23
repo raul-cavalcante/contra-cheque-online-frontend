@@ -63,11 +63,20 @@ export const getPresignedUrl = async (
 // Fazer upload do arquivo para o S3 usando a URL pré-assinada
 export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean> => {
   try {
-    await axios.put(uploadUrl, file, {
+    const response = await fetch(uploadUrl, {
+      method: 'PUT',
       headers: {
         'Content-Type': file.type,
       },
+      body: file
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Erro na resposta do S3:', errorText);
+      return false;
+    }
+
     return true;
   } catch (error) {
     console.error('Erro no upload para S3:', error);
