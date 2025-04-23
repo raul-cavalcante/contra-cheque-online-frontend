@@ -66,7 +66,7 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
     const response = await fetch(uploadUrl, {
       method: 'PUT',
       headers: {
-        'Content-Type': file.type,
+        'Content-Type': 'application/pdf',
       },
       body: file
     });
@@ -74,13 +74,13 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Erro na resposta do S3:', errorText);
-      return false;
+      throw new Error(errorText);
     }
 
     return true;
   } catch (error) {
     console.error('Erro no upload para S3:', error);
-    return false;
+    throw error;
   }
 };
 
@@ -140,21 +140,25 @@ export const handleFileUpload = async (
   onProgress?: (progress: number) => void
 ): Promise<{ success: boolean; message: string; jobId?: string }> => {
   try {
-    // Validar tipo do arquivo
     if (!validateFileType(file)) {
       throw new Error('Apenas arquivos PDF são permitidos');
     }
 
-    // Obter URL pré-assinada
-    const presignedData = await getPresignedUrl(year, month, file.type, authToken);
+    console.log('Obtendo URL pré-assinada...');
+    const presignedData = await getPresignedUrl(year, month, 'application/pdf', authToken);
     
-    // Fazer upload para S3
-    const uploadSuccess = await uploadToS3(presignedData.uploadUrl, file);
-    if (!uploadSuccess) {
-      throw new Error('Falha no upload do arquivo para o S3');
+    console.log('Iniciando upload para S3...');
+    try {
+      const uploadSuccess = await uploadToS3(presignedData.uploadUrl, file);
+      if (!uploadSuccess) {
+        throw new Error('Falha no upload do arquivo para o S3');
+      }
+    } catch (uploadError: any) {
+      console.error('Erro detalhado do upload:', uploadError);
+      throw new Error(`Falha no upload: ${uploadError?.message || 'Erro desconhecido'}`);
     }
 
-    // Iniciar processamento
+    console.log('Upload concluído, iniciando processamento...');
     const jobId = await initiateS3Processing(
       presignedData.fileKey,
       year,
@@ -188,6 +192,7 @@ export const handleFileUpload = async (
     }
 
   } catch (error) {
+    console.error('Erro completo:', error);
     if (error instanceof Error) {
       return { success: false, message: error.message };
     }
