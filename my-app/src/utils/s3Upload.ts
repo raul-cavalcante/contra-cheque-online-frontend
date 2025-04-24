@@ -69,17 +69,28 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
         'Content-Type': file.type,
       },
       body: file,
-      mode: 'cors'  // Adicione esta linha
+      mode: 'cors', // Explicitamente define o modo CORS
+      credentials: 'omit' // Não envia credenciais
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Erro na resposta do S3:', errorText);
-      throw new Error(errorText);
+    // Para URLs pré-assinadas do S3, podemos receber um status 200 sem corpo
+    if (response.status === 200) {
+      return true;
     }
 
-    return true;
+    const errorText = await response.text();
+    console.error('Erro na resposta do S3:', {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
+      error: errorText
+    });
+    throw new Error(`Erro no upload: ${response.status} ${response.statusText}`);
   } catch (error) {
+    if (error instanceof TypeError && error.message === 'Failed to fetch') {
+      console.error('Erro de CORS ou rede:', error);
+      throw new Error('Erro de conexão. Verifique se o backend está configurado corretamente para CORS.');
+    }
     console.error('Erro no upload para S3:', error);
     throw error;
   }
