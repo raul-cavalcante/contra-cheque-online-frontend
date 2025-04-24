@@ -66,9 +66,10 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
     const response = await fetch(uploadUrl, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/pdf',
+        'Content-Type': file.type,
       },
-      body: file
+      body: file,
+      mode: 'cors'  // Adicione esta linha
     });
 
     if (!response.ok) {
