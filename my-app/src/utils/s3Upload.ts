@@ -77,13 +77,31 @@ export const getPresignedUrl = async (
 // Fazer upload do arquivo para o S3 usando a URL pré-assinada
 export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean> => {
   try {
-    // Configuração mínima necessária para o upload
+    // Parse os parâmetros da URL pré-assinada
+    const url = new URL(uploadUrl);
+    const amzHeaders: Record<string, string> = {};
+
+    // Extrair os headers x-amz da URL
+    url.searchParams.forEach((value, key) => {
+      if (key.startsWith('x-amz-') || key.startsWith('X-Amz-')) {
+        amzHeaders[key] = value;
+      }
+    });
+
+    // Configuração da requisição
     const response = await fetch(uploadUrl, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/pdf'
+        'Content-Type': 'application/pdf',
+        ...amzHeaders
       },
       body: file
+    });
+
+    // Log para debug
+    console.log('Headers enviados:', {
+      'Content-Type': 'application/pdf',
+      ...amzHeaders
     });
 
     if (response.ok) {
@@ -95,24 +113,36 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
     console.error('Erro detalhado do S3:', {
       status: response.status,
       statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
       error: errorText
     });
 
+    // Parser do XML de erro do S3
+    const getS3ErrorDetails = (xmlText: string) => {
+      try {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+        return {
+          code: xmlDoc.querySelector('Code')?.textContent || 'Unknown',
+          message: xmlDoc.querySelector('Message')?.textContent || 'Unknown error'
+        };
+      } catch (e) {
+        return { code: 'ParseError', message: 'Não foi possível ler o erro do S3' };
+      }
+    };
+
     if (response.status === 403) {
-      const errorBody = errorText.includes('<Error>') ? 
-        new DOMParser().parseFromString(errorText, 'text/xml') : null;
-      const errorCode = errorBody?.querySelector('Code')?.textContent;
-      const errorMessage = errorBody?.querySelector('Message')?.textContent;
-      
-      throw new Error(
-        `Erro de permissão no S3: ${errorMessage || 'Acesso negado'}`
-      );
+      const { code, message } = getS3ErrorDetails(errorText);
+      throw new Error(`Erro de permissão no S3 (${code}): ${message}`);
     }
 
     throw new Error(`Erro no upload: ${response.status} ${response.statusText}`);
   } catch (error) {
     console.error('Erro no upload para S3:', error);
-    throw error;
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('Erro desconhecido durante o upload');
   }
 };
 
