@@ -81,6 +81,9 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
       method: 'PUT',
       headers: {
         'Content-Type': file.type,
+        'x-amz-acl': 'public-read',
+        'x-amz-checksum-crc32': 'AAAAAA==',
+        'x-amz-sdk-checksum-algorithm': 'CRC32'
       },
       body: file,
       mode: 'cors', // Explicitamente define o modo CORS
@@ -88,7 +91,7 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
     });
 
     // Para URLs pré-assinadas do S3, podemos receber um status 200 sem corpo
-    if (response.status === 200) {
+    if (response.ok) {
       return true;
     }
 
@@ -99,6 +102,11 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
       headers: Object.fromEntries(response.headers.entries()),
       error: errorText
     });
+
+    if (response.status === 403) {
+      throw new Error('Acesso negado ao S3. Verifique as permissões e as configurações de CORS.');
+    }
+
     throw new Error(`Erro no upload: ${response.status} ${response.statusText}`);
   } catch (error) {
     if (error instanceof TypeError && error.message === 'Failed to fetch') {
