@@ -77,29 +77,13 @@ export const getPresignedUrl = async (
 // Fazer upload do arquivo para o S3 usando a URL pré-assinada
 export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean> => {
   try {
-    // Parse os parâmetros da URL pré-assinada
-    const url = new URL(uploadUrl);
-    
-    // Use apenas o Content-Type como header
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/pdf'
-    };
-
-    console.log('Headers do upload:', headers);
-
+    // Configuração mínima necessária para o upload
     const response = await fetch(uploadUrl, {
       method: 'PUT',
-      headers,
-      body: file,
-      mode: 'cors',
-      credentials: 'omit'
-    });
-
-    // Log detalhado da resposta para debug
-    console.log('Resposta do S3:', {
-      status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries())
+      headers: {
+        'Content-Type': 'application/pdf'
+      },
+      body: file
     });
 
     if (response.ok) {
@@ -111,7 +95,6 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
     console.error('Erro detalhado do S3:', {
       status: response.status,
       statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries()),
       error: errorText
     });
 
@@ -122,16 +105,12 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
       const errorMessage = errorBody?.querySelector('Message')?.textContent;
       
       throw new Error(
-        `Acesso negado ao S3 (${errorCode}): ${errorMessage || 'Verifique as permissões'}`
+        `Erro de permissão no S3: ${errorMessage || 'Acesso negado'}`
       );
     }
 
     throw new Error(`Erro no upload: ${response.status} ${response.statusText}`);
   } catch (error) {
-    if (error instanceof TypeError && error.message === 'Failed to fetch') {
-      console.error('Erro de CORS ou rede:', error);
-      throw new Error('Erro de conexão com o S3. Verifique a conexão.');
-    }
     console.error('Erro no upload para S3:', error);
     throw error;
   }
