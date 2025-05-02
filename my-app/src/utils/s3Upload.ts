@@ -44,39 +44,9 @@ export const isLargeFile = (file: File): boolean => {
   return file.size > FILE_SIZE_THRESHOLD;
 };
 
-// Validação mais rigorosa do tipo de arquivo
+// Validação do tipo de arquivo
 export const validateFileType = (file: File): boolean => {
-  // Verifica o tipo MIME
-  if (file.type !== 'application/pdf') {
-    return false;
-  }
-
-  // Verifica a extensão do arquivo
-  const fileName = file.name.toLowerCase();
-  if (!fileName.endsWith('.pdf')) {
-    return false;
-  }
-
-  // Verifica o tamanho máximo (10MB)
-  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB em bytes
-  if (file.size > MAX_FILE_SIZE) {
-    return false;
-  }
-
-  return true;
-};
-
-// Função para validar o nome do arquivo
-export const sanitizeFileName = (fileName: string): string => {
-  // Remove caracteres especiais e espaços
-  let sanitized = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
-  
-  // Garante que o arquivo termine em .pdf
-  if (!sanitized.toLowerCase().endsWith('.pdf')) {
-    sanitized += '.pdf';
-  }
-  
-  return sanitized;
+  return file.type === 'application/pdf';
 };
 
 // Obter URL pré-assinada para upload ao S3
@@ -270,53 +240,29 @@ export const handleFileUpload = async (
   onProgress?: (status: ProcessingStatus) => void
 ): Promise<{ success: boolean; message: string; jobId?: string; result?: any }> => {
   try {
-    // Validação do ano
-    const yearNum = Number(year);
-    if (isNaN(yearNum) || yearNum < 2000 || yearNum > 2100) {
-      throw new Error('Ano inválido. Use um valor entre 2000 e 2100.');
-    }
-
-    // Validação do mês
-    const monthNum = Number(month);
-    if (isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
-      throw new Error('Mês inválido. Use um valor entre 1 e 12.');
-    }
-
-    // Validação do arquivo
     if (!validateFileType(file)) {
-      throw new Error('Arquivo inválido. Use apenas arquivos PDF de até 10MB.');
+      throw new Error('Apenas arquivos PDF são permitidos');
     }
-
-    // Sanitização do nome do arquivo
-    const sanitizedFileName = sanitizeFileName(file.name);
-    const renamedFile = new File([file], sanitizedFileName, { type: file.type });
 
     console.log('Obtendo URL pré-assinada...');
-    const presignedData = await getPresignedUrl(yearNum, monthNum, 'application/pdf', authToken);
+    const presignedData = await getPresignedUrl(year, month, 'application/pdf', authToken);
     
     console.log('Iniciando upload para S3...');
     try {
-      const uploadSuccess = await uploadToS3(presignedData.uploadUrl, renamedFile);
+      const uploadSuccess = await uploadToS3(presignedData.uploadUrl, file);
       if (!uploadSuccess) {
-        throw new Error('Falha no upload do arquivo para o servidor.');
+        throw new Error('Falha no upload do arquivo para o S3');
       }
     } catch (uploadError: any) {
       console.error('Erro detalhado do upload:', uploadError);
-      // Mensagens de erro mais específicas
-      if (uploadError.message?.includes('network')) {
-        throw new Error('Erro de conexão. Verifique sua internet e tente novamente.');
-      } else if (uploadError.message?.includes('403')) {
-        throw new Error('Erro de permissão. Faça login novamente.');
-      } else {
-        throw new Error(`Falha no upload: ${uploadError?.message || 'Erro desconhecido'}`);
-      }
+      throw new Error(`Falha no upload: ${uploadError?.message || 'Erro desconhecido'}`);
     }
 
     console.log('Upload concluído, iniciando processamento...');
     const jobId = await initiateS3Processing(
       presignedData.fileKey,
-      yearNum,
-      monthNum,
+      year,
+      month,
       authToken
     );
 
@@ -328,17 +274,12 @@ export const handleFileUpload = async (
           if (onProgress) onProgress(status);
         },
         (error) => {
-          reject({ 
-            success: false, 
-            message: error.message, 
-            jobId,
-            error: error.message 
-          });
+          reject({ success: false, message: error.message, jobId });
         },
         (result) => {
           resolve({
             success: true,
-            message: 'Arquivo processado com sucesso!',
+            message: 'Upload e processamento concluídos com sucesso',
             jobId,
             result
           });
@@ -349,17 +290,9 @@ export const handleFileUpload = async (
   } catch (error) {
     console.error('Erro completo:', error);
     if (error instanceof Error) {
-      return { 
-        success: false, 
-        message: error.message,
-        error: error.message 
-      };
+      return { success: false, message: error.message };
     }
-    return { 
-      success: false, 
-      message: 'Erro desconhecido durante o upload',
-      error: 'Erro interno do sistema' 
-    };
+    return { success: false, message: 'Erro desconhecido durante o upload' };
   }
 };
 
