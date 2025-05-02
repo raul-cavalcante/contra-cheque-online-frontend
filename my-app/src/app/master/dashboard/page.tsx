@@ -149,7 +149,7 @@ const DashboardPage = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true); // Inicia o estado de carregamento
+    setLoading(true);
     setSuccess('');
     setError('');
     setJobId(null);
@@ -157,14 +157,35 @@ const DashboardPage = () => {
     setProgress(0);
     setProcessResult(null);
 
-    if (!year || !month || !file) {
-      setError('Todos os campos são obrigatórios.');
-      setLoading(false); // Finaliza o estado de carregamento
+    // Validação de ano e mês
+    const yearNum = parseInt(year);
+    const monthNum = parseInt(month);
+
+    if (!yearNum || yearNum < 2000 || yearNum > 2100) {
+      setError('Por favor, insira um ano válido entre 2000 e 2100.');
+      setLoading(false);
+      return;
+    }
+
+    if (!monthNum || monthNum < 1 || monthNum > 12) {
+      setError('Por favor, insira um mês válido entre 1 e 12.');
+      setLoading(false);
+      return;
+    }
+
+    if (!file) {
+      setError('Por favor, selecione um arquivo PDF.');
+      setLoading(false);
       return;
     }
 
     try {
       const { auth_token } = parseCookies();
+      if (!auth_token) {
+        setError('Sessão expirada. Por favor, faça login novamente.');
+        window.location.href = '/master';
+        return;
+      }
 
       // Verifica se o arquivo é grande (maior que 4MB)
       if (isLargeFile(file)) {
@@ -206,7 +227,22 @@ const DashboardPage = () => {
         setLoading(false);
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Erro ao enviar o arquivo.');
+      let errorMessage = 'Erro ao enviar o arquivo.';
+      
+      if (err.message?.includes('CORS')) {
+        errorMessage = 'Erro de conexão com o servidor de armazenamento. Por favor, tente novamente.';
+      } else if (err.response?.status === 413) {
+        errorMessage = 'O arquivo é muito grande. Tamanho máximo permitido é 10MB.';
+      } else if (err.response?.status === 401) {
+        errorMessage = 'Sessão expirada. Por favor, faça login novamente.';
+        setTimeout(() => {
+          window.location.href = '/master';
+        }, 2000);
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      }
+
+      setError(errorMessage);
       setSuccess('');
       setLoading(false);
     }
@@ -280,6 +316,15 @@ const DashboardPage = () => {
     window.location.href = '/master';
   };
 
+  // Função para formatar o tamanho do arquivo
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
   // Renderizar a barra de progresso
   const renderProgressBar = () => {
     if (!jobId || !jobStatus) return null;
@@ -287,15 +332,27 @@ const DashboardPage = () => {
     return (
       <div className="mt-4">
         <div className="mb-2 flex justify-between">
-          <span className="text-sm font-medium">Processando...</span>
-          <span className="text-sm font-medium">{Math.round(progress)}%</span>
+          <span className="text-sm font-medium">
+            {jobStatus === 'processing' ? 'Processando...' : 'Concluído'}
+          </span>
+          <span className="text-sm font-medium transition-all duration-300">
+            {Math.round(progress)}%
+          </span>
         </div>
-        <div className="w-full bg-gray-200 rounded-full h-2.5">
+        <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
           <div 
-            className="bg-blue-600 h-2.5 rounded-full" 
-            style={{ width: `${progress}%` }}
+            className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out"
+            style={{ 
+              width: `${progress}%`,
+              transition: 'width 0.5s ease-out'
+            }}
           ></div>
         </div>
+        {file && (
+          <p className="mt-2 text-xs text-gray-600">
+            Tamanho do arquivo: {formatFileSize(file.size)}
+          </p>
+        )}
       </div>
     );
   };
