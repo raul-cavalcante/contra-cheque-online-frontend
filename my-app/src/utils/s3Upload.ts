@@ -77,26 +77,43 @@ export const getPresignedUrl = async (
 // Fazer upload do arquivo para o S3 usando a URL pré-assinada
 export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean> => {
   try {
-    const response = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': file.type,
-        'x-amz-acl': 'public-read',
-        'x-amz-checksum-crc32': 'AAAAAA==',
-        'x-amz-sdk-checksum-algorithm': 'CRC32'
-      },
-      body: file,
-      mode: 'cors', // Explicitamente define o modo CORS
-      credentials: 'omit' // Não envia credenciais
+    // Parse os parâmetros da URL pré-assinada
+    const url = new URL(uploadUrl);
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/pdf',
+    };
+
+    // Adiciona os headers da URL pré-assinada
+    url.searchParams.forEach((value, key) => {
+      if (key.startsWith('x-amz-')) {
+        headers[key] = value;
+      }
     });
 
-    // Para URLs pré-assinadas do S3, podemos receber um status 200 sem corpo
+    console.log('Headers do upload:', headers);
+
+    const response = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers,
+      body: file,
+      mode: 'cors',
+      credentials: 'omit'
+    });
+
+    // Log detalhado da resposta para debug
+    console.log('Resposta do S3:', {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries())
+    });
+
     if (response.ok) {
+      console.log('Upload concluído com sucesso');
       return true;
     }
 
     const errorText = await response.text();
-    console.error('Erro na resposta do S3:', {
+    console.error('Erro detalhado do S3:', {
       status: response.status,
       statusText: response.statusText,
       headers: Object.fromEntries(response.headers.entries()),
@@ -104,14 +121,21 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
     });
 
     if (response.status === 403) {
-      throw new Error('Acesso negado ao S3. Verifique as permissões e as configurações de CORS.');
+      const errorBody = errorText.includes('<Error>') ? 
+        new DOMParser().parseFromString(errorText, 'text/xml') : null;
+      const errorCode = errorBody?.querySelector('Code')?.textContent;
+      const errorMessage = errorBody?.querySelector('Message')?.textContent;
+      
+      throw new Error(
+        `Acesso negado ao S3 (${errorCode}): ${errorMessage || 'Verifique as permissões e configurações CORS'}`
+      );
     }
 
     throw new Error(`Erro no upload: ${response.status} ${response.statusText}`);
   } catch (error) {
     if (error instanceof TypeError && error.message === 'Failed to fetch') {
       console.error('Erro de CORS ou rede:', error);
-      throw new Error('Erro de conexão. Verifique se o backend está configurado corretamente para CORS.');
+      throw new Error('Erro de conexão com o S3. Verifique a conexão e as configurações CORS.');
     }
     console.error('Erro no upload para S3:', error);
     throw error;
