@@ -79,16 +79,11 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
   try {
     // Parse os parâmetros da URL pré-assinada
     const url = new URL(uploadUrl);
+    
+    // Use apenas o Content-Type como header
     const headers: Record<string, string> = {
-      'Content-Type': 'application/pdf',
+      'Content-Type': 'application/pdf'
     };
-
-    // Adiciona os headers da URL pré-assinada
-    url.searchParams.forEach((value, key) => {
-      if (key.startsWith('x-amz-')) {
-        headers[key] = value;
-      }
-    });
 
     console.log('Headers do upload:', headers);
 
@@ -127,7 +122,7 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
       const errorMessage = errorBody?.querySelector('Message')?.textContent;
       
       throw new Error(
-        `Acesso negado ao S3 (${errorCode}): ${errorMessage || 'Verifique as permissões e configurações CORS'}`
+        `Acesso negado ao S3 (${errorCode}): ${errorMessage || 'Verifique as permissões'}`
       );
     }
 
@@ -135,7 +130,7 @@ export const uploadToS3 = async (uploadUrl: string, file: File): Promise<boolean
   } catch (error) {
     if (error instanceof TypeError && error.message === 'Failed to fetch') {
       console.error('Erro de CORS ou rede:', error);
-      throw new Error('Erro de conexão com o S3. Verifique a conexão e as configurações CORS.');
+      throw new Error('Erro de conexão com o S3. Verifique a conexão.');
     }
     console.error('Erro no upload para S3:', error);
     throw error;
