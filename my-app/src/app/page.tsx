@@ -67,8 +67,7 @@ const Page = () => {
           maxAge: 43200, // 12 horas em segundos
           path: '/',
           secure: true, // Sempre usar HTTPS
-          sameSite: 'strict',
-          httpOnly: true // Previne acesso via JavaScript
+          sameSite: 'strict'
         });
         
         window.location.href = '/user';

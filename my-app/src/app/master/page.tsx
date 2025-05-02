@@ -57,10 +57,10 @@ const AdminLoginPage = () => {
         }
 
         setCookie(null, 'auth_token', response.data.token, {
-          maxAge: 86400,
+          maxAge: 43200, // 12 horas em segundos
           path: '/',
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'strict',
+          secure: true, // Sempre usar HTTPS
+          sameSite: 'strict'
         });
 
         window.location.href = '/master/dashboard';
