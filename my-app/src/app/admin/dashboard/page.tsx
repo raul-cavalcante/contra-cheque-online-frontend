@@ -6,14 +6,9 @@ import axios from 'axios';
 import {
   FILE_SIZE_THRESHOLD,
   isLargeFile,
-  getPresignedUrl,
-  uploadToS3,
-  initiateS3Processing,
-  checkJobStatus,
-  uploadPayrollFile,
-  JobStatusResponse,
   handleFileUpload,
   validateFileType,
+  ProcessingStatus
 } from '@/utils/s3Upload';
 
 // Defina o tipo para os administradores
@@ -30,12 +25,7 @@ const DashboardPage = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
-  // Estados para o processamento do upload
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [jobStatus, setJobStatus] = useState<string | null>(null);
-  const [progress, setProgress] = useState<number>(0);
-  const [processResult, setProcessResult] = useState<object | null>(null);
-  // Atualize o estado com o tipo correto
+  const [processResult, setProcessResult] = useState<ProcessingStatus | null>(null);
   const [admins, setAdmins] = useState<Admin[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [isUploading, setIsUploading] = useState(false);
@@ -43,66 +33,13 @@ const DashboardPage = () => {
   useEffect(() => {
     const validateAuth = async () => {
       const { auth_token } = parseCookies();
-
       if (!auth_token) {
         window.location.href = '/admin';
         return;
       }
-
-      try {
-        // await axios.get('https://api-contra-cheque-online.vercel.app/validate-token', {
-        //   headers: {
-        //     Authorization: `Bearer ${auth_token}`,
-        //   },
-        // });
-      } catch (err) {
-        destroyCookie(null, 'auth_token');
-        window.location.href = '/admin';
-      }
     };
-
     validateAuth();
   }, []);
-
-  // Efeito para verificar o status do job periodicamente
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    
-    if (jobId && jobStatus !== 'completed' && jobStatus !== 'failed') {
-      interval = setInterval(checkJobStatusPeriodically, 2000); // Verifica a cada 2 segundos
-    }
-    
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [jobId, jobStatus]);
-
-  // Função para verificar o status do job
-  const checkJobStatusPeriodically = async () => {
-    if (!jobId) return;
-    
-    try {
-      const { auth_token } = parseCookies();
-      const jobStatusResponse = await checkJobStatus(jobId, auth_token);
-      
-      const { status, progress, result } = jobStatusResponse;
-      setJobStatus(status);
-      setProgress(progress);
-      
-      if (status === 'completed') {
-        setProcessResult(result);
-        setSuccess('Arquivo processado com sucesso!');
-        setLoading(false);
-      } else if (status === 'failed') {
-        setError('Falha no processamento do arquivo.');
-        setLoading(false);
-      }
-    } catch (err) {
-      console.error('Erro ao verificar status do job:', err);
-      setError('Erro ao verificar status do processamento.');
-      setLoading(false);
-    }
-  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -117,22 +54,62 @@ const DashboardPage = () => {
     }
   };
 
+  // Renderizar a barra de progresso com informações detalhadas
+  const renderProgressBar = (progressStatus?: ProcessingStatus) => {
+    if (!progressStatus) return null;
+    
+    const { status, progress } = progressStatus;
+    const percentage = progress ? 
+      Math.round((progress.pagesProcessed / progress.totalPages) * 100) : 0;
+    
+    return (
+      <div className="mt-4">
+        <div className="mb-2 flex justify-between">
+          <span className="text-sm font-medium">
+            {status === 'processing' ? (
+              <>
+                Processando chunk {progress?.currentChunk} de {progress?.totalChunks}
+              </>
+            ) : status === 'completed' ? 
+              'Concluído' : 'Erro no processamento'}
+          </span>
+          <span className="text-sm font-medium transition-all duration-300">
+            {percentage}%
+          </span>
+        </div>
+        <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+          <div 
+            className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out"
+            style={{ 
+              width: `${percentage}%`,
+              transition: 'width 0.5s ease-out'
+            }}
+          ></div>
+        </div>
+        {progress && (
+          <p className="mt-2 text-xs text-gray-600">
+            {progress.pagesProcessed} de {progress.totalPages} páginas processadas
+          </p>
+        )}
+      </div>
+    );
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setIsUploading(true);
-
-    if (!year || !month || !file) {
-      setError('Todos os campos são obrigatórios.');
-      setLoading(false);
-      setIsUploading(false);
-      return;
-    }
+    setSuccess('');
+    setError('');
+    setProcessResult(null);
 
     try {
       const { auth_token } = parseCookies();
       if (!auth_token) {
-        throw new Error('Usuário não autenticado');
+        throw new Error('Sessão expirada. Por favor, faça login novamente.');
+      }
+
+      if (!year || !month || !file) {
+        throw new Error('Por favor, preencha todos os campos.');
       }
 
       const result = await handleFileUpload(
@@ -140,12 +117,16 @@ const DashboardPage = () => {
         year,
         month,
         auth_token,
-        (progress) => setUploadProgress(progress)
+        (status) => {
+          if (status.status === 'processing' && status.progress) {
+            setSuccess(`Processando... ${status.progress.pagesProcessed} de ${status.progress.totalPages} páginas`);
+          }
+          setProcessResult(status);
+        }
       );
 
       if (result.success) {
-        setSuccess('Arquivo enviado com sucesso!');
-        setError('');
+        setSuccess('Arquivo processado com sucesso!');
         setYear('');
         setMonth('');
         setFile(null);
@@ -153,38 +134,16 @@ const DashboardPage = () => {
         throw new Error(result.message);
       }
     } catch (err: any) {
-      setError(err.message || 'Erro ao enviar o arquivo.');
-      setSuccess('');
+      console.error('Erro completo:', err);
+      setError(err.message || 'Erro ao processar o arquivo');
     } finally {
       setLoading(false);
-      setIsUploading(false);
-      setUploadProgress(0);
     }
   };
 
   const handleLogout = () => {
     destroyCookie(null, 'auth_token');
     window.location.href = '/admin';
-  };
-
-  // Renderizar a barra de progresso
-  const renderProgressBar = () => {
-    if (!jobId || !jobStatus) return null;
-    
-    return (
-      <div className="mt-4">
-        <div className="mb-2 flex justify-between">
-          <span className="text-sm font-medium">Processando...</span>
-          <span className="text-sm font-medium">{Math.round(progress)}%</span>
-        </div>
-        <div className="w-full bg-gray-200 rounded-full h-2.5">
-          <div 
-            className="bg-blue-600 h-2.5 rounded-full" 
-            style={{ width: `${progress}%` }}
-          ></div>
-        </div>
-      </div>
-    );
   };
 
   return (

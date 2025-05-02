@@ -22,6 +22,20 @@ export interface JobStatusResponse {
   result: object | null;
 }
 
+// Atualiza a interface de resposta do status para incluir informações de progresso
+export interface ProcessingStatus {
+  status: 'processing' | 'completed' | 'error';
+  message?: string;
+  progress?: {
+    currentChunk: number;
+    totalChunks: number;
+    pagesProcessed: number;
+    totalPages: number;
+  };
+  error?: string;
+  result?: any;
+}
+
 // Tamanho do arquivo limite para usar upload direto ao S3 (4MB)
 export const FILE_SIZE_THRESHOLD = 4 * 1024 * 1024;
 
@@ -102,9 +116,9 @@ export const initiateS3Processing = async (
   year: number | string,
   month: number | string,
   authToken: string
-): Promise<string | null> => {
+): Promise<string> => {
   try {
-    const response = await axios.post<ProcessS3UploadResponse>(
+    const response = await axios.post<{ jobId: string }>(
       'https://api-contra-cheque-online.vercel.app/process-s3-upload',
       {
         fileKey,
@@ -119,28 +133,66 @@ export const initiateS3Processing = async (
       }
     );
 
+    if (!response.data.jobId) {
+      throw new Error('JobId não retornado pelo servidor');
+    }
+
     return response.data.jobId;
   } catch (error) {
     console.error('Erro ao iniciar processamento:', error);
-    return null;
+    throw error;
   }
 };
 
-// Verificar o status do job de processamento
-export const checkJobStatus = async (
+// Função para verificar o status do processamento
+export const checkProcessingStatus = async (
   jobId: string,
   authToken: string
-): Promise<JobStatusResponse> => {
-  const response = await axios.get<JobStatusResponse>(
-    `https://api-contra-cheque-online.vercel.app/upload/payroll/status/${jobId}`,
+): Promise<ProcessingStatus> => {
+  const response = await axios.get<ProcessingStatus>(
+    `https://api-contra-cheque-online.vercel.app/process-s3-upload/status/${jobId}`,
     {
       headers: {
         Authorization: `Bearer ${authToken}`,
       },
     }
   );
-
   return response.data;
+};
+
+// Função de polling para verificar o status periodicamente
+export const pollProcessingStatus = async (
+  jobId: string,
+  authToken: string,
+  onProgress: (status: ProcessingStatus) => void,
+  onError: (error: Error) => void,
+  onComplete: (result: any) => void
+): Promise<void> => {
+  try {
+    const status = await checkProcessingStatus(jobId, authToken);
+    
+    switch (status.status) {
+      case 'processing':
+        onProgress(status);
+        // Continua o polling após 2 segundos
+        setTimeout(() => pollProcessingStatus(jobId, authToken, onProgress, onError, onComplete), 2000);
+        break;
+      
+      case 'completed':
+        onComplete(status.result);
+        break;
+      
+      case 'error':
+        onError(new Error(status.error || 'Erro no processamento'));
+        break;
+    }
+  } catch (error) {
+    if (error instanceof Error) {
+      onError(error);
+    } else {
+      onError(new Error('Erro desconhecido ao verificar status'));
+    }
+  }
 };
 
 // Função principal para gerenciar todo o processo de upload
@@ -149,8 +201,8 @@ export const handleFileUpload = async (
   year: number | string,
   month: number | string,
   authToken: string,
-  onProgress?: (progress: number) => void
-): Promise<{ success: boolean; message: string; jobId?: string }> => {
+  onProgress?: (status: ProcessingStatus) => void
+): Promise<{ success: boolean; message: string; jobId?: string; result?: any }> => {
   try {
     if (!validateFileType(file)) {
       throw new Error('Apenas arquivos PDF são permitidos');
@@ -178,30 +230,26 @@ export const handleFileUpload = async (
       authToken
     );
 
-    if (!jobId) {
-      throw new Error('Falha ao iniciar o processamento do arquivo');
-    }
-
-    // Monitorar o status do processamento
-    let status: JobStatusResponse;
-    do {
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Espera 2 segundos entre verificações
-      status = await checkJobStatus(jobId, authToken);
-      
-      if (onProgress && status.progress) {
-        onProgress(status.progress);
-      }
-    } while (status.status === 'processing');
-
-    if (status.status === 'completed') {
-      return { 
-        success: true, 
-        message: 'Upload e processamento concluídos com sucesso',
-        jobId: status.jobId 
-      };
-    } else {
-      throw new Error('Falha no processamento do arquivo');
-    }
+    return new Promise((resolve, reject) => {
+      pollProcessingStatus(
+        jobId,
+        authToken,
+        (status) => {
+          if (onProgress) onProgress(status);
+        },
+        (error) => {
+          reject({ success: false, message: error.message, jobId });
+        },
+        (result) => {
+          resolve({
+            success: true,
+            message: 'Upload e processamento concluídos com sucesso',
+            jobId,
+            result
+          });
+        }
+      );
+    });
 
   } catch (error) {
     console.error('Erro completo:', error);

@@ -9,9 +9,10 @@ import {
   getPresignedUrl,
   uploadToS3,
   initiateS3Processing,
-  checkJobStatus,
+  checkProcessingStatus,
   uploadPayrollFile,
   JobStatusResponse,
+  ProcessingStatus
 } from '@/utils/s3Upload';
 
 // Defina o tipo para os administradores
@@ -95,18 +96,20 @@ const DashboardPage = () => {
     
     try {
       const { auth_token } = parseCookies();
-      const jobStatusResponse = await checkJobStatus(jobId, auth_token);
+      const status = await checkProcessingStatus(jobId, auth_token);
       
-      const { status, progress, result } = jobStatusResponse;
-      setJobStatus(status);
-      setProgress(progress);
+      if (status.progress) {
+        setProgress(status.progress.pagesProcessed / status.progress.totalPages * 100);
+      }
       
-      if (status === 'completed') {
-        setProcessResult(result);
+      setJobStatus(status.status);
+      
+      if (status.status === 'completed') {
+        setProcessResult(status.result);
         setSuccess('Arquivo processado com sucesso!');
         setLoading(false);
-      } else if (status === 'failed') {
-        setError('Falha no processamento do arquivo.');
+      } else if (status.status === 'error') {
+        setError(status.error || 'Falha no processamento do arquivo.');
         setLoading(false);
       }
     } catch (err) {
