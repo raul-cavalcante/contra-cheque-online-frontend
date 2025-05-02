@@ -25,7 +25,6 @@ const AdminLoginPage = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validação básica
     if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
       setError('Email inválido. Por favor, digite um email válido.');
       return;
@@ -45,22 +44,20 @@ const AdminLoginPage = () => {
         password,
       });
 
-      console.log('Resposta da API:', response.data); // Log para depuração
-
       if (response.data && response.data.token) {
         const { role } = response.data.admin;
 
         if (role !== 'master') {
           setError('Acesso negado. Apenas usuários com permissão de "master" podem acessar.');
-          console.log('Role recebido:', role); // Log para depuração
           return;
         }
 
         setCookie(null, 'auth_token', response.data.token, {
-          maxAge: 86400,
+          maxAge: 43200, // 12 horas em segundos
           path: '/',
-          secure: process.env.NODE_ENV === 'production',
+          secure: true, // Sempre usar HTTPS
           sameSite: 'strict',
+          httpOnly: true // Previne acesso via JavaScript
         });
 
         window.location.href = '/master/dashboard';
@@ -75,7 +72,7 @@ const AdminLoginPage = () => {
       } else {
         setError('Erro ao processar a solicitação.');
       }
-      console.error('Erro na requisição:', err); // Log para depuração
+      console.error('Erro na requisição:', err);
     } finally {
       setLoading(false);
     }

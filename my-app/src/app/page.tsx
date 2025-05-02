@@ -55,53 +55,38 @@ const Page = () => {
     setLoading(true);
     
     try {
-      // Importações necessárias no topo do arquivo:
-      // import axios from 'axios';
-      // import { setCookie } from 'nookies';
-      
       setError('');
       
-      // Fazendo a requisição POST com axios
       const response = await axios.post<authResponse>('https://api-contra-cheque-online.vercel.app/login/user', {
         cpf: cpf.replace(/\D/g, ''),
         password
       });
       
-      // Verificando se a resposta contém um token
       if (response.data && response.data.token) {
-        // Armazenando o token em um cookie usando nookies (expira em 1 dia)
         setCookie(null, 'auth_token', response.data.token, {
-          maxAge: 86400, // 24 horas em segundos
-          path: '/', // Cookie disponível em todas as rotas
-          secure: process.env.NODE_ENV === 'production', // Secure em produção
-          sameSite: 'strict'
+          maxAge: 43200, // 12 horas em segundos
+          path: '/',
+          secure: true, // Sempre usar HTTPS
+          sameSite: 'strict',
+          httpOnly: true // Previne acesso via JavaScript
         });
         
-        // Redirecionando para a página do usuário
         window.location.href = '/user';
-        console.log(response)
       } else {
         setError('Resposta inválida do servidor. Token não encontrado.');
       }
-      
-      console.log('Login bem-sucedido:', response.data);
     } catch (err: any) {
-      // Tratamento de erro mais específico
       if (err.response) {
-        // O servidor respondeu com um status de erro
         setError(err.response.data.message || 'Falha na autenticação. Verifique suas credenciais.');
       } else if (err.request) {
-        // A requisição foi feita mas não houve resposta
         setError('Servidor indisponível. Tente novamente mais tarde.');
       } else {
-        // Erro na configuração da requisição
         setError('Erro ao processar a solicitação.');
       }
       console.error(err);
     } finally {
       setLoading(false);
     }
-
   };
 
   return (
