@@ -34,6 +34,8 @@ export interface ProcessingStatus {
   };
   error?: string;
   result?: any;
+  retryAfter?: number;
+  etag?: string;
 }
 
 // Tamanho do arquivo limite para usar upload direto ao S3 (4MB)
@@ -183,17 +185,43 @@ export const initiateS3Processing = async (
 // Função para verificar o status do processamento
 export const checkProcessingStatus = async (
   jobId: string,
-  authToken: string
+  authToken: string,
+  etag?: string
 ): Promise<ProcessingStatus> => {
-  const response = await axios.get<ProcessingStatus>(
-    `https://api-contra-cheque-online.vercel.app/process-s3-upload/status/${jobId}`,
-    {
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
+  try {
+    const headers: any = {
+      Authorization: `Bearer ${authToken}`,
+    };
+
+    if (etag) {
+      headers['If-None-Match'] = etag;
     }
-  );
-  return response.data;
+
+    const response = await axios.get<ProcessingStatus>(
+      `https://api-contra-cheque-online.vercel.app/process-s3-upload/status/${jobId}`,
+      { headers }
+    );
+
+    // Se o status for 304 (Not Modified), retorna o status anterior
+    if (response.status === 304) {
+      throw new Error('NOT_MODIFIED');
+    }
+
+    // Obtém o retry-after do header, ou usa 3 segundos como padrão
+    const retryAfter = response.headers['retry-after'] ? 
+      parseInt(response.headers['retry-after']) * 1000 : 3000;
+
+    return {
+      ...response.data,
+      retryAfter,
+      etag: response.headers['etag']
+    };
+  } catch (error: any) {
+    if (error.message === 'NOT_MODIFIED') {
+      throw error;
+    }
+    throw error;
+  }
 };
 
 // Função de polling para verificar o status periodicamente

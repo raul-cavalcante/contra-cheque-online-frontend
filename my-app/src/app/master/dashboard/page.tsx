@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { parseCookies, destroyCookie } from 'nookies';
 import axios from 'axios';
 import {
@@ -44,6 +44,10 @@ const DashboardPage = () => {
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [progress, setProgress] = useState<number>(0);
   const [processResult, setProcessResult] = useState<object | null>(null);
+  const [etag, setEtag] = useState<string | null>(null);
+  const [lastCheckTime, setLastCheckTime] = useState<number>(0);
+  const startTimeRef = useRef<number>(0);
+  const MAX_PROCESSING_TIME = 5 * 60 * 1000; // 5 minutos
 
   const toggleMenu = () => {
     setIsMenuOpen((prev) => !prev);
@@ -79,45 +83,85 @@ const DashboardPage = () => {
 
   // Efeito para verificar o status do job periodicamente
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    
-    if (jobId && jobStatus !== 'completed' && jobStatus !== 'failed') {
-      interval = setInterval(checkJobStatusPeriodically, 2000); // Verifica a cada 2 segundos
-    }
-    
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [jobId, jobStatus]);
+    let timeoutId: NodeJS.Timeout;
 
-  // Função para verificar o status do job
-  const checkJobStatusPeriodically = async () => {
-    if (!jobId) return;
-    
-    try {
-      const { auth_token } = parseCookies();
-      const status = await checkProcessingStatus(jobId, auth_token);
-      
-      if (status.progress) {
-        setProgress(status.progress.pagesProcessed / status.progress.totalPages * 100);
-      }
-      
-      setJobStatus(status.status);
-      
-      if (status.status === 'completed') {
-        setProcessResult(status.result);
-        setSuccess('Arquivo processado com sucesso!');
+    async function checkStatus() {
+      // Verifica se excedeu o tempo máximo
+      if (startTimeRef.current && Date.now() - startTimeRef.current > MAX_PROCESSING_TIME) {
+        setError('Tempo máximo de processamento excedido');
         setLoading(false);
-      } else if (status.status === 'error') {
-        setError(status.error || 'Falha no processamento do arquivo.');
+        return;
+      }
+
+      try {
+        if (!jobId || jobStatus === 'completed' || jobStatus === 'error') {
+          return;
+        }
+
+        // Verifica o tempo mínimo entre verificações
+        const now = Date.now();
+        const timeSinceLastCheck = now - lastCheckTime;
+        if (timeSinceLastCheck < 3000) {
+          timeoutId = setTimeout(checkStatus, 3000 - timeSinceLastCheck);
+          return;
+        }
+
+        const { auth_token } = parseCookies();
+        if (!auth_token) {
+          setError('Sessão expirada');
+          return;
+        }
+
+        const status = await checkProcessingStatus(jobId, auth_token, etag || undefined);
+        setLastCheckTime(now);
+
+        if (status.progress) {
+          const percentage = (status.progress.pagesProcessed / status.progress.totalPages) * 100;
+          setProgress(percentage);
+          setSuccess(`Processando... ${status.progress.pagesProcessed} de ${status.progress.totalPages} páginas`);
+        }
+
+        setJobStatus(status.status);
+        if (status.etag) setEtag(status.etag);
+
+        if (status.status === 'completed') {
+          setProcessResult(status.result);
+          setSuccess('Arquivo processado com sucesso!');
+          setLoading(false);
+        } else if (status.status === 'error') {
+          setError(status.error || 'Falha no processamento do arquivo.');
+          setLoading(false);
+        } else if (status.status === 'processing') {
+          // Agenda próxima verificação respeitando o retry-after
+          const nextCheckDelay = status.retryAfter || 3000;
+          timeoutId = setTimeout(checkStatus, nextCheckDelay);
+        }
+      } catch (err: any) {
+        if (err.message === 'NOT_MODIFIED') {
+          // Se nada mudou, agenda próxima verificação
+          timeoutId = setTimeout(checkStatus, 3000);
+          return;
+        }
+
+        console.error('Erro ao verificar status:', err);
+        setError('Erro ao verificar status do processamento.');
         setLoading(false);
       }
-    } catch (err) {
-      console.error('Erro ao verificar status do job:', err);
-      setError('Erro ao verificar status do processamento.');
-      setLoading(false);
     }
-  };
+
+    if (jobId && jobStatus === 'processing') {
+      if (!startTimeRef.current) {
+        startTimeRef.current = Date.now();
+      }
+      checkStatus();
+    }
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [jobId, jobStatus, etag, lastCheckTime]);
 
   useEffect(() => {
     const fetchAdmins = async () => {
@@ -549,7 +593,7 @@ const DashboardPage = () => {
               </li>
             ))}
           </ul>
-          {showDeleteMode && (
+          {showDeleteMode && selectedAdmins.length > 0 && (
             <button
               onClick={handleDeleteAdmins}
               className="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors"
