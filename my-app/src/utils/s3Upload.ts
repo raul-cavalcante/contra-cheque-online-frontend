@@ -36,6 +36,8 @@ export interface ProcessingStatus {
   result?: any;
   retryAfter?: number;
   etag?: string;
+  attempt?: number;
+  maxAttempts?: number;
 }
 
 // Tamanho do arquivo limite para usar upload direto ao S3 (4MB)
@@ -186,8 +188,17 @@ export const initiateS3Processing = async (
 export const checkProcessingStatus = async (
   jobId: string,
   authToken: string,
-  etag?: string
+  etag?: string,
+  attempt: number = 1
 ): Promise<ProcessingStatus> => {
+  const MAX_ATTEMPTS = 30; // Máximo de 30 tentativas
+  const BASE_DELAY = 3000; // 3 segundos
+  const MAX_DELAY = 10000; // Máximo de 10 segundos entre tentativas
+
+  if (attempt > MAX_ATTEMPTS) {
+    throw new Error('MAX_ATTEMPTS_EXCEEDED');
+  }
+
   try {
     const headers: any = {
       Authorization: `Bearer ${authToken}`,
@@ -207,18 +218,31 @@ export const checkProcessingStatus = async (
       throw new Error('NOT_MODIFIED');
     }
 
-    // Obtém o retry-after do header, ou usa 3 segundos como padrão
+    // Calcula o próximo delay usando backoff exponencial
+    const backoffDelay = Math.min(
+      BASE_DELAY * Math.pow(1.5, attempt - 1),
+      MAX_DELAY
+    );
+
+    // Obtém o retry-after do header, ou usa o backoff calculado
     const retryAfter = response.headers['retry-after'] ? 
-      parseInt(response.headers['retry-after']) * 1000 : 3000;
+      parseInt(response.headers['retry-after']) * 1000 : backoffDelay;
 
     return {
       ...response.data,
       retryAfter,
-      etag: response.headers['etag']
+      etag: response.headers['etag'],
+      attempt: attempt,
+      maxAttempts: MAX_ATTEMPTS
     };
   } catch (error: any) {
     if (error.message === 'NOT_MODIFIED') {
-      throw error;
+      // Para respostas 304, usa backoff exponencial
+      const backoffDelay = Math.min(
+        BASE_DELAY * Math.pow(1.5, attempt - 1),
+        MAX_DELAY
+      );
+      throw new Error(`NOT_MODIFIED:${backoffDelay}`);
     }
     throw error;
   }

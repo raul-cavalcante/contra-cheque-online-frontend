@@ -45,7 +45,7 @@ const DashboardPage = () => {
   const [progress, setProgress] = useState<number>(0);
   const [processResult, setProcessResult] = useState<object | null>(null);
   const [etag, setEtag] = useState<string | null>(null);
-  const [lastCheckTime, setLastCheckTime] = useState<number>(0);
+  const [currentAttempt, setCurrentAttempt] = useState<number>(1);
   const startTimeRef = useRef<number>(0);
   const MAX_PROCESSING_TIME = 5 * 60 * 1000; // 5 minutos
 
@@ -86,23 +86,15 @@ const DashboardPage = () => {
     let timeoutId: NodeJS.Timeout;
 
     async function checkStatus() {
-      // Verifica se excedeu o tempo máximo
-      if (startTimeRef.current && Date.now() - startTimeRef.current > MAX_PROCESSING_TIME) {
-        setError('Tempo máximo de processamento excedido');
-        setLoading(false);
-        return;
-      }
-
       try {
-        if (!jobId || jobStatus === 'completed' || jobStatus === 'error') {
+        // Verifica se excedeu o tempo máximo
+        if (startTimeRef.current && Date.now() - startTimeRef.current > MAX_PROCESSING_TIME) {
+          setError('Tempo máximo de processamento excedido');
+          setLoading(false);
           return;
         }
 
-        // Verifica o tempo mínimo entre verificações
-        const now = Date.now();
-        const timeSinceLastCheck = now - lastCheckTime;
-        if (timeSinceLastCheck < 3000) {
-          timeoutId = setTimeout(checkStatus, 3000 - timeSinceLastCheck);
+        if (!jobId || jobStatus === 'completed' || jobStatus === 'error') {
           return;
         }
 
@@ -112,13 +104,17 @@ const DashboardPage = () => {
           return;
         }
 
-        const status = await checkProcessingStatus(jobId, auth_token, etag || undefined);
-        setLastCheckTime(now);
-
+        const status = await checkProcessingStatus(
+          jobId, 
+          auth_token, 
+          etag || undefined,
+          currentAttempt
+        );
+        
         if (status.progress) {
           const percentage = (status.progress.pagesProcessed / status.progress.totalPages) * 100;
           setProgress(percentage);
-          setSuccess(`Processando... ${status.progress.pagesProcessed} de ${status.progress.totalPages} páginas`);
+          setSuccess(`Processando... ${status.progress.pagesProcessed} de ${status.progress.totalPages} páginas (Tentativa ${status.attempt}/${status.maxAttempts})`);
         }
 
         setJobStatus(status.status);
@@ -132,14 +128,20 @@ const DashboardPage = () => {
           setError(status.error || 'Falha no processamento do arquivo.');
           setLoading(false);
         } else if (status.status === 'processing') {
-          // Agenda próxima verificação respeitando o retry-after
-          const nextCheckDelay = status.retryAfter || 3000;
-          timeoutId = setTimeout(checkStatus, nextCheckDelay);
+          setCurrentAttempt(prev => prev + 1);
+          timeoutId = setTimeout(checkStatus, status.retryAfter || 3000);
         }
       } catch (err: any) {
-        if (err.message === 'NOT_MODIFIED') {
-          // Se nada mudou, agenda próxima verificação
-          timeoutId = setTimeout(checkStatus, 3000);
+        if (err.message.startsWith('NOT_MODIFIED:')) {
+          const delay = parseInt(err.message.split(':')[1]);
+          setCurrentAttempt(prev => prev + 1);
+          timeoutId = setTimeout(checkStatus, delay);
+          return;
+        }
+
+        if (err.message === 'MAX_ATTEMPTS_EXCEEDED') {
+          setError('Número máximo de tentativas excedido. Por favor, tente novamente.');
+          setLoading(false);
           return;
         }
 
@@ -161,7 +163,7 @@ const DashboardPage = () => {
         clearTimeout(timeoutId);
       }
     };
-  }, [jobId, jobStatus, etag, lastCheckTime]);
+  }, [jobId, jobStatus, etag, currentAttempt]);
 
   useEffect(() => {
     const fetchAdmins = async () => {
