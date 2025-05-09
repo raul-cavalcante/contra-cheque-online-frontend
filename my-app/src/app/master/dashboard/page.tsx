@@ -44,8 +44,7 @@ const DashboardPage = () => {
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [progress, setProgress] = useState<number>(0);
   const [processResult, setProcessResult] = useState<object | null>(null);
-  const [etag, setEtag] = useState<string | null>(null);
-  const [currentAttempt, setCurrentAttempt] = useState<number>(1);
+  const [currentStep, setCurrentStep] = useState<string>('');
   const startTimeRef = useRef<number>(0);
   const MAX_PROCESSING_TIME = 5 * 60 * 1000; // 5 minutos
 
@@ -84,6 +83,7 @@ const DashboardPage = () => {
   // Efeito para verificar o status do job periodicamente
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
+    let lastProgress: number | undefined;
 
     async function checkStatus() {
       try {
@@ -104,21 +104,19 @@ const DashboardPage = () => {
           return;
         }
 
-        const status = await checkProcessingStatus(
-          jobId, 
-          auth_token, 
-          etag || undefined,
-          currentAttempt
-        );
+        const status = await checkProcessingStatus(jobId, auth_token, lastProgress);
+        lastProgress = status.progress;
         
-        if (status.progress) {
-          const percentage = (status.progress.pagesProcessed / status.progress.totalPages) * 100;
-          setProgress(percentage);
-          setSuccess(`Processando... ${status.progress.pagesProcessed} de ${status.progress.totalPages} páginas (Tentativa ${status.attempt}/${status.maxAttempts})`);
+        if (status.progress !== undefined) {
+          setProgress(status.progress);
+        }
+        
+        if (status.currentStep) {
+          setCurrentStep(status.currentStep);
+          setSuccess(`${status.currentStep} - ${status.progress}%`);
         }
 
         setJobStatus(status.status);
-        if (status.etag) setEtag(status.etag);
 
         if (status.status === 'completed') {
           setProcessResult(status.result);
@@ -128,32 +126,24 @@ const DashboardPage = () => {
           setError(status.error || 'Falha no processamento do arquivo.');
           setLoading(false);
         } else if (status.status === 'processing') {
-          setCurrentAttempt(prev => prev + 1);
-          timeoutId = setTimeout(checkStatus, status.retryAfter || 3000);
+          const nextDelay = status.retryDelay ? status.retryDelay * 1000 : 3000;
+          timeoutId = setTimeout(checkStatus, nextDelay);
         }
-      } catch (err: any) {
-        if (err.message === 'JOB_NOT_FOUND') {
-          setError('O processo não foi encontrado no servidor. Por favor, tente fazer o upload novamente.');
+      } catch (error: any) {
+        if (error.message?.startsWith('NOT_MODIFIED:')) {
+          const delay = parseInt(error.message.split(':')[1]);
+          timeoutId = setTimeout(checkStatus, delay);
+          return;
+        }
+
+        if (error.response?.status === 404) {
+          setError('O processo não foi encontrado no servidor.');
           setLoading(false);
           return;
         }
 
-        if (err.message === 'AUTH_ERROR') {
-          setError('Sua sessão expirou. Por favor, faça login novamente.');
-          setTimeout(() => {
-            window.location.href = '/master';
-          }, 2000);
-          return;
-        }
-
-        if (err.message === 'MAX_ATTEMPTS_EXCEEDED') {
-          setError('O processo excedeu o número máximo de tentativas. Por favor, tente novamente.');
-          setLoading(false);
-          return;
-        }
-
-        console.error('Erro ao verificar status:', err);
-        setError(err.message || 'Erro ao verificar status do processamento.');
+        console.error('Erro ao verificar status:', error);
+        setError(error.message || 'Erro ao verificar status do processamento.');
         setLoading(false);
       }
     }
@@ -161,7 +151,6 @@ const DashboardPage = () => {
     if (jobId && jobStatus === 'processing') {
       if (!startTimeRef.current) {
         startTimeRef.current = Date.now();
-        console.log('Iniciando temporizador para o processo:', jobId);
       }
       checkStatus();
     }
@@ -171,7 +160,7 @@ const DashboardPage = () => {
         clearTimeout(timeoutId);
       }
     };
-  }, [jobId, jobStatus, etag, currentAttempt]);
+  }, [jobId, jobStatus]);
 
   useEffect(() => {
     const fetchAdmins = async () => {

@@ -26,18 +26,18 @@ export interface JobStatusResponse {
 export interface ProcessingStatus {
   status: 'processing' | 'completed' | 'error';
   message?: string;
-  progress?: {
-    currentChunk: number;
-    totalChunks: number;
-    pagesProcessed: number;
-    totalPages: number;
-  };
+  progress?: number;
+  currentStep?: string;
+  startedAt?: string;
+  lastUpdated?: string;
+  timeoutAt?: string;
+  attempts?: number;
+  maxAttempts?: number;
+  retryDelay?: number;
+  maxRetries?: number;
+  maxTime?: number;
   error?: string;
   result?: any;
-  retryAfter?: number;
-  etag?: string;
-  attempt?: number;
-  maxAttempts?: number;
 }
 
 // Tamanho do arquivo limite para usar upload direto ao S3 (4MB)
@@ -193,83 +193,62 @@ export const initiateS3Processing = async (
   }
 };
 
+// Função para calcular o próximo delay com base no progresso
+const calculateNextDelay = (status: ProcessingStatus): number => {
+  const baseDelay = status.retryDelay ? status.retryDelay * 1000 : 3000;
+  
+  // Se o progresso não mudou, aumenta o delay
+  if (status.progress === 5) {
+    return Math.min(baseDelay * 1.5, 10000); // máximo de 10 segundos
+  }
+  
+  // Se estamos extraindo páginas, aumenta ainda mais o delay
+  if (status.currentStep === 'Extraindo páginas do PDF') {
+    return Math.min(baseDelay * 2, 15000); // máximo de 15 segundos
+  }
+  
+  return baseDelay;
+};
+
 // Função para verificar o status do processamento
 export const checkProcessingStatus = async (
   jobId: string,
   authToken: string,
-  etag?: string,
-  attempt: number = 1
+  lastProgress?: number
 ): Promise<ProcessingStatus> => {
-  const MAX_ATTEMPTS = 30;
-  const BASE_DELAY = 3000;
-  const MAX_DELAY = 10000;
-
-  if (attempt > MAX_ATTEMPTS) {
-    throw new Error('MAX_ATTEMPTS_EXCEEDED');
-  }
-
   try {
-    console.log(`Verificando status do job ${jobId} (tentativa ${attempt}/${MAX_ATTEMPTS})`);
+    console.log(`Verificando status do job ${jobId}`);
     
-    const headers: any = {
-      Authorization: `Bearer ${authToken}`,
-    };
-
-    if (etag) {
-      headers['If-None-Match'] = etag;
-    }
-
     const response = await axios.get<ProcessingStatus>(
       `https://api-contra-cheque-online.vercel.app/process-s3-upload/status/${jobId}`,
       { 
-        headers,
-        validateStatus: (status) => status === 200 || status === 304
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        }
       }
     );
 
-    // Se o status for 304 (Not Modified), retorna o status anterior
-    if (response.status === 304) {
-      throw new Error('NOT_MODIFIED');
+    const status = response.data;
+    console.log('Status recebido:', status);
+
+    // Se o status não mudou, considera como não modificado
+    if (lastProgress === status.progress) {
+      throw new Error(`NOT_MODIFIED:${calculateNextDelay(status)}`);
     }
 
-    // Calcula o próximo delay usando backoff exponencial
-    const backoffDelay = Math.min(
-      BASE_DELAY * Math.pow(1.5, attempt - 1),
-      MAX_DELAY
-    );
-
-    // Obtém o retry-after do header, ou usa o backoff calculado
-    const retryAfter = response.headers['retry-after'] ? 
-      parseInt(response.headers['retry-after']) * 1000 : backoffDelay;
-
-    console.log('Status recebido:', response.data);
+    // Calcula o próximo delay com base no status atual
+    const nextDelay = calculateNextDelay(status);
 
     return {
-      ...response.data,
-      retryAfter,
-      etag: response.headers['etag'],
-      attempt,
-      maxAttempts: MAX_ATTEMPTS
+      ...status,
+      retryDelay: nextDelay / 1000 // Converte para segundos
     };
   } catch (error: any) {
+    if (error.message?.startsWith('NOT_MODIFIED:')) {
+      throw error;
+    }
+
     console.error('Erro ao verificar status:', error.response || error);
-
-    if (error.message === 'NOT_MODIFIED') {
-      const backoffDelay = Math.min(
-        BASE_DELAY * Math.pow(1.5, attempt - 1),
-        MAX_DELAY
-      );
-      throw new Error(`NOT_MODIFIED:${backoffDelay}`);
-    }
-
-    if (error.response?.status === 404) {
-      throw new Error('JOB_NOT_FOUND');
-    }
-
-    if (error.response?.status === 401) {
-      throw new Error('AUTH_ERROR');
-    }
-
     throw error;
   }
 };
@@ -282,31 +261,42 @@ export const pollProcessingStatus = async (
   onError: (error: Error) => void,
   onComplete: (result: any) => void
 ): Promise<void> => {
-  try {
-    const status = await checkProcessingStatus(jobId, authToken);
-    
-    switch (status.status) {
-      case 'processing':
-        onProgress(status);
-        // Continua o polling após 2 segundos
-        setTimeout(() => pollProcessingStatus(jobId, authToken, onProgress, onError, onComplete), 2000);
-        break;
+  let lastProgress: number | undefined;
+  
+  const checkStatusWithBackoff = async () => {
+    try {
+      const status = await checkProcessingStatus(jobId, authToken, lastProgress);
+      lastProgress = status.progress;
       
-      case 'completed':
-        onComplete(status.result);
-        break;
-      
-      case 'error':
-        onError(new Error(status.error || 'Erro no processamento'));
-        break;
+      switch (status.status) {
+        case 'processing':
+          onProgress(status);
+          const nextDelay = status.retryDelay ? status.retryDelay * 1000 : 3000;
+          console.log(`Próxima verificação em ${nextDelay/1000} segundos`);
+          setTimeout(checkStatusWithBackoff, nextDelay);
+          break;
+        
+        case 'completed':
+          onComplete(status.result);
+          break;
+        
+        case 'error':
+          onError(new Error(status.error || 'Erro no processamento'));
+          break;
+      }
+    } catch (error: any) {
+      if (error.message?.startsWith('NOT_MODIFIED:')) {
+        const delay = parseInt(error.message.split(':')[1]);
+        console.log(`Status não modificado, próxima verificação em ${delay/1000} segundos`);
+        setTimeout(checkStatusWithBackoff, delay);
+        return;
+      }
+
+      onError(error instanceof Error ? error : new Error('Erro ao verificar status'));
     }
-  } catch (error) {
-    if (error instanceof Error) {
-      onError(error);
-    } else {
-      onError(new Error('Erro desconhecido ao verificar status'));
-    }
-  }
+  };
+
+  checkStatusWithBackoff();
 };
 
 // Função principal para gerenciar todo o processo de upload
