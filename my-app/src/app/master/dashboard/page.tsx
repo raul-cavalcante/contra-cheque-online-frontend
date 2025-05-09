@@ -84,6 +84,8 @@ const DashboardPage = () => {
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
     let lastProgress: number | undefined;
+    let unchangedProgressCount = 0;
+    const MAX_UNCHANGED_PROGRESS = 5; // Número máximo de verificações com progresso inalterado
 
     async function checkStatus() {
       try {
@@ -104,41 +106,82 @@ const DashboardPage = () => {
           return;
         }
 
-        const status = await checkProcessingStatus(jobId, auth_token, lastProgress);
+        const status = await checkProcessingStatus(jobId, auth_token);
+        
+        // Verifica se o progresso está paralisado
+        if (status.progress === lastProgress) {
+          unchangedProgressCount++;
+          // Se o progresso não mudou por muito tempo, aumenta o delay
+          if (unchangedProgressCount >= MAX_UNCHANGED_PROGRESS) {
+            const nextDelay = Math.min((unchangedProgressCount - MAX_UNCHANGED_PROGRESS + 1) * 3000, 15000);
+            timeoutId = setTimeout(checkStatus, nextDelay);
+            return;
+          }
+        } else {
+          // Reseta o contador se o progresso mudou
+          unchangedProgressCount = 0;
+        }
+
         lastProgress = status.progress;
         
-        if (status.progress !== undefined) {
+        // Atualiza o progresso apenas se tivermos um valor válido
+        if (typeof status.progress === 'number') {
           setProgress(status.progress);
-        }
-        
-        if (status.currentStep) {
-          setCurrentStep(status.currentStep);
-          setSuccess(`${status.currentStep} - ${status.progress}%`);
+          
+          // Atualiza a mensagem de sucesso com o progresso atual
+          if (status.currentStep) {
+            setCurrentStep(status.currentStep);
+            setSuccess(`${status.currentStep} - ${Math.round(status.progress)}%`);
+          }
         }
 
         setJobStatus(status.status);
 
-        if (status.status === 'completed') {
-          setProcessResult(status.result);
-          setSuccess('Arquivo processado com sucesso!');
-          setLoading(false);
-        } else if (status.status === 'error') {
-          setError(status.error || 'Falha no processamento do arquivo.');
-          setLoading(false);
-        } else if (status.status === 'processing') {
-          const nextDelay = status.retryDelay ? status.retryDelay * 1000 : 3000;
-          timeoutId = setTimeout(checkStatus, nextDelay);
+        switch (status.status) {
+          case 'completed':
+            setProcessResult(status.result);
+            setSuccess('Arquivo processado com sucesso!');
+            setLoading(false);
+            break;
+            
+          case 'error':
+            setError(status.error || 'Falha no processamento do arquivo.');
+            setLoading(false);
+            break;
+            
+          case 'processing':
+            // Calcula o próximo delay com base no progresso
+            let nextDelay = 3000; // Delay base
+
+            // Se o progresso está paralisado, aumenta o delay gradualmente
+            if (unchangedProgressCount > 0) {
+              nextDelay = Math.min(3000 + (unchangedProgressCount * 1000), 15000);
+            }
+
+            timeoutId = setTimeout(checkStatus, nextDelay);
+            break;
         }
       } catch (error: any) {
-        if (error.message?.startsWith('NOT_MODIFIED:')) {
-          const delay = parseInt(error.message.split(':')[1]);
-          timeoutId = setTimeout(checkStatus, delay);
+        // Trata respostas 304 (Not Modified)
+        if (error.response?.status === 304) {
+          // Se recebemos 304, aumentamos o delay gradualmente
+          const nextDelay = Math.min(3000 + (unchangedProgressCount * 1000), 15000);
+          unchangedProgressCount++;
+          timeoutId = setTimeout(checkStatus, nextDelay);
           return;
         }
 
         if (error.response?.status === 404) {
           setError('O processo não foi encontrado no servidor.');
           setLoading(false);
+          return;
+        }
+
+        if (error.response?.status === 401) {
+          setError('Sessão expirada. Por favor, faça login novamente.');
+          setTimeout(() => {
+            window.location.href = '/master';
+          }, 2000);
           return;
         }
 
