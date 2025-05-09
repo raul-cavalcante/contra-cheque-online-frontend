@@ -193,35 +193,45 @@ export const initiateS3Processing = async (
   }
 };
 
-// Função para calcular o próximo delay com base no progresso
-const calculateNextDelay = (status: ProcessingStatus): number => {
-  const baseDelay = status.retryDelay ? status.retryDelay * 1000 : 3000;
-  
-  // Se o progresso não mudou, aumenta o delay
-  if (status.progress === 5) {
-    return Math.min(baseDelay * 1.5, 10000); // máximo de 10 segundos
+// Constantes para controle de polling
+const MIN_DELAY = 3000; // 3 segundos
+const MAX_DELAY = 15000; // 15 segundos
+const MAX_ATTEMPTS = 100; // número máximo de tentativas
+const DELAY_MULTIPLIER = 1.5; // fator de multiplicação para backoff exponencial
+
+// Função para calcular o próximo delay com base no status
+const calculateNextDelay = (status: ProcessingStatus, currentDelay: number = MIN_DELAY): number => {
+  // Se o servidor retornou um retryDelay específico, use-o
+  if (status.retryDelay) {
+    return status.retryDelay * 1000;
   }
-  
-  // Se estamos extraindo páginas, aumenta ainda mais o delay
-  if (status.currentStep === 'Extraindo páginas do PDF') {
-    return Math.min(baseDelay * 2, 15000); // máximo de 15 segundos
+
+  // Se o progresso está baixo, use delays mais longos
+  if (status.progress && status.progress <= 10) {
+    return Math.min(currentDelay * DELAY_MULTIPLIER, MAX_DELAY);
   }
-  
-  return baseDelay;
+
+  // Se o progresso é maior que 10%, mantém o delay atual
+  return currentDelay;
 };
 
 // Função para verificar o status do processamento
 export const checkProcessingStatus = async (
   jobId: string,
   authToken: string,
-  lastProgress?: number
+  attempt: number = 1,
+  currentDelay: number = MIN_DELAY
 ): Promise<ProcessingStatus> => {
+  if (attempt > MAX_ATTEMPTS) {
+    throw new Error('MAX_ATTEMPTS_EXCEEDED');
+  }
+
   try {
-    console.log(`Verificando status do job ${jobId}`);
+    console.log(`Verificando status do job ${jobId} (tentativa ${attempt}/${MAX_ATTEMPTS})`);
     
     const response = await axios.get<ProcessingStatus>(
       `https://api-contra-cheque-online.vercel.app/process-s3-upload/status/${jobId}`,
-      { 
+      {
         headers: {
           Authorization: `Bearer ${authToken}`,
         }
@@ -231,24 +241,24 @@ export const checkProcessingStatus = async (
     const status = response.data;
     console.log('Status recebido:', status);
 
-    // Se o status não mudou, considera como não modificado
-    if (lastProgress === status.progress) {
-      throw new Error(`NOT_MODIFIED:${calculateNextDelay(status)}`);
-    }
-
-    // Calcula o próximo delay com base no status atual
-    const nextDelay = calculateNextDelay(status);
+    // Calcula o próximo delay baseado no status atual
+    const nextDelay = calculateNextDelay(status, currentDelay);
 
     return {
       ...status,
-      retryDelay: nextDelay / 1000 // Converte para segundos
+      retryDelay: nextDelay / 1000 // Converte para segundos ao retornar
     };
   } catch (error: any) {
-    if (error.message?.startsWith('NOT_MODIFIED:')) {
-      throw error;
+    console.error('Erro ao verificar status:', error.response || error);
+
+    if (error.response?.status === 404) {
+      throw new Error('JOB_NOT_FOUND');
     }
 
-    console.error('Erro ao verificar status:', error.response || error);
+    if (error.response?.status === 401) {
+      throw new Error('AUTH_ERROR');
+    }
+
     throw error;
   }
 };
@@ -261,19 +271,20 @@ export const pollProcessingStatus = async (
   onError: (error: Error) => void,
   onComplete: (result: any) => void
 ): Promise<void> => {
-  let lastProgress: number | undefined;
+  let attempt = 1;
+  let currentDelay = MIN_DELAY;
   
   const checkStatusWithBackoff = async () => {
     try {
-      const status = await checkProcessingStatus(jobId, authToken, lastProgress);
-      lastProgress = status.progress;
+      const status = await checkProcessingStatus(jobId, authToken, attempt, currentDelay);
       
       switch (status.status) {
         case 'processing':
           onProgress(status);
-          const nextDelay = status.retryDelay ? status.retryDelay * 1000 : 3000;
-          console.log(`Próxima verificação em ${nextDelay/1000} segundos`);
-          setTimeout(checkStatusWithBackoff, nextDelay);
+          currentDelay = status.retryDelay ? status.retryDelay * 1000 : calculateNextDelay(status, currentDelay);
+          attempt++;
+          console.log(`Próxima verificação em ${currentDelay/1000} segundos`);
+          setTimeout(checkStatusWithBackoff, currentDelay);
           break;
         
         case 'completed':
@@ -285,10 +296,8 @@ export const pollProcessingStatus = async (
           break;
       }
     } catch (error: any) {
-      if (error.message?.startsWith('NOT_MODIFIED:')) {
-        const delay = parseInt(error.message.split(':')[1]);
-        console.log(`Status não modificado, próxima verificação em ${delay/1000} segundos`);
-        setTimeout(checkStatusWithBackoff, delay);
+      if (error.message === 'MAX_ATTEMPTS_EXCEEDED') {
+        onError(new Error('Número máximo de tentativas excedido'));
         return;
       }
 
@@ -335,16 +344,50 @@ export const handleFileUpload = async (
     );
 
     return new Promise((resolve, reject) => {
+      // Timeout global de 5 minutos
+      const timeoutId = setTimeout(() => {
+        reject({
+          success: false,
+          message: 'Tempo limite de processamento excedido (5 minutos)',
+          jobId
+        });
+      }, 5 * 60 * 1000);
+
+      let lastProgress: number | undefined;
+      let unchangedCount = 0;
+      const MAX_UNCHANGED = 10; // Máximo de verificações sem mudança
+
       pollProcessingStatus(
         jobId,
         authToken,
         (status) => {
-          if (onProgress) onProgress(status);
+          if (onProgress) {
+            onProgress(status);
+          }
+
+          // Verifica se o progresso mudou
+          if (lastProgress === status.progress) {
+            unchangedCount++;
+            if (unchangedCount >= MAX_UNCHANGED) {
+              clearTimeout(timeoutId);
+              reject({
+                success: false,
+                message: 'Processamento paralisado - nenhum progresso detectado',
+                jobId
+              });
+              return;
+            }
+          } else {
+            unchangedCount = 0;
+            lastProgress = status.progress;
+          }
         },
         (error) => {
+          clearTimeout(timeoutId);
           reject({ success: false, message: error.message, jobId });
         },
         (result) => {
+          clearTimeout(timeoutId);
           resolve({
             success: true,
             message: 'Upload e processamento concluídos com sucesso',

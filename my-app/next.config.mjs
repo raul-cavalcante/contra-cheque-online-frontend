@@ -4,10 +4,7 @@ const nextConfig = {
   swcMinify: true,
   images: {
     domains: ['example.com'], // Substitua por domínios permitidos para imagens
-  },
-  experimental: {
-    appDir: true,
-  },
+  }
 };
 
 export default nextConfig;

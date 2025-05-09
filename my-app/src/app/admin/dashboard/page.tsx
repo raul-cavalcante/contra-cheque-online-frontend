@@ -26,6 +26,8 @@ const DashboardPage = () => {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [processResult, setProcessResult] = useState<ProcessingStatus | null>(null);
+  const [currentProgress, setCurrentProgress] = useState<number>(0);
+  const [currentStep, setCurrentStep] = useState<string>('');
   const [admins, setAdmins] = useState<Admin[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [isUploading, setIsUploading] = useState(false);
@@ -54,41 +56,41 @@ const DashboardPage = () => {
     }
   };
 
-  // Renderizar a barra de progresso com informações detalhadas
-  const renderProgressBar = (progressStatus?: ProcessingStatus) => {
-    if (!progressStatus) return null;
-    
-    const { status, progress } = progressStatus;
-    const percentage = progress ? 
-      Math.round((progress.pagesProcessed / progress.totalPages) * 100) : 0;
+  // Função para formatar o tamanho do arquivo
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  // Renderizar a barra de progresso
+  const renderProgressBar = () => {
+    if (!loading) return null;
     
     return (
       <div className="mt-4">
         <div className="mb-2 flex justify-between">
           <span className="text-sm font-medium">
-            {status === 'processing' ? (
-              <>
-                Processando chunk {progress?.currentChunk} de {progress?.totalChunks}
-              </>
-            ) : status === 'completed' ? 
-              'Concluído' : 'Erro no processamento'}
+            {currentStep || 'Processando...'}
           </span>
           <span className="text-sm font-medium transition-all duration-300">
-            {percentage}%
+            {Math.round(currentProgress)}%
           </span>
         </div>
         <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
           <div 
             className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out"
             style={{ 
-              width: `${percentage}%`,
+              width: `${currentProgress}%`,
               transition: 'width 0.5s ease-out'
             }}
           ></div>
         </div>
-        {progress && (
+        {file && (
           <p className="mt-2 text-xs text-gray-600">
-            {progress.pagesProcessed} de {progress.totalPages} páginas processadas
+            Tamanho do arquivo: {formatFileSize(file.size)}
           </p>
         )}
       </div>
@@ -101,6 +103,8 @@ const DashboardPage = () => {
     setSuccess('');
     setError('');
     setProcessResult(null);
+    setCurrentProgress(0);
+    setCurrentStep('');
 
     try {
       const { auth_token } = parseCookies();
@@ -118,8 +122,14 @@ const DashboardPage = () => {
         month,
         auth_token,
         (status) => {
-          if (status.status === 'processing' && status.progress) {
-            setSuccess(`Processando... ${status.progress.pagesProcessed} de ${status.progress.totalPages} páginas`);
+          if (status.status === 'processing') {
+            if (typeof status.progress === 'number') {
+              setCurrentProgress(status.progress);
+            }
+            if (status.currentStep) {
+              setCurrentStep(status.currentStep);
+              setSuccess(`${status.currentStep} - ${Math.round(status.progress || 0)}%`);
+            }
           }
           setProcessResult(status);
         }
@@ -253,7 +263,7 @@ const DashboardPage = () => {
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                   ></path>
                 </svg>
-                {isUploading ? 'Enviando...' : 'Processando...'}
+                {currentStep ? 'Processando...' : 'Enviando...'}
               </>
             ) : (
               'Enviar'
