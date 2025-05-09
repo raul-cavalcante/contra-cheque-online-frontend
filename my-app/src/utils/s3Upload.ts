@@ -158,6 +158,8 @@ export const initiateS3Processing = async (
   authToken: string
 ): Promise<string> => {
   try {
+    console.log('Iniciando processamento para:', { fileKey, year, month });
+    
     const response = await axios.post<{ jobId: string }>(
       'https://api-contra-cheque-online.vercel.app/process-s3-upload',
       {
@@ -170,17 +172,24 @@ export const initiateS3Processing = async (
           Authorization: `Bearer ${authToken}`,
           'Content-Type': 'application/json',
         },
+        validateStatus: (status) => status === 202, // Apenas 202 Accepted é válido
       }
     );
 
-    if (!response.data.jobId) {
+    if (!response.data?.jobId) {
       throw new Error('JobId não retornado pelo servidor');
     }
 
+    console.log('Job iniciado com sucesso:', response.data.jobId);
     return response.data.jobId;
-  } catch (error) {
-    console.error('Erro ao iniciar processamento:', error);
-    throw error;
+  } catch (error: any) {
+    console.error('Erro detalhado ao iniciar processamento:', error.response || error);
+    if (error.response?.status === 404) {
+      throw new Error('Endpoint de processamento não encontrado. Verifique a configuração do servidor.');
+    } else if (error.response?.status === 401) {
+      throw new Error('Sessão expirada ou token inválido.');
+    }
+    throw new Error(`Erro ao iniciar processamento: ${error.message}`);
   }
 };
 
@@ -191,15 +200,17 @@ export const checkProcessingStatus = async (
   etag?: string,
   attempt: number = 1
 ): Promise<ProcessingStatus> => {
-  const MAX_ATTEMPTS = 30; // Máximo de 30 tentativas
-  const BASE_DELAY = 3000; // 3 segundos
-  const MAX_DELAY = 10000; // Máximo de 10 segundos entre tentativas
+  const MAX_ATTEMPTS = 30;
+  const BASE_DELAY = 3000;
+  const MAX_DELAY = 10000;
 
   if (attempt > MAX_ATTEMPTS) {
     throw new Error('MAX_ATTEMPTS_EXCEEDED');
   }
 
   try {
+    console.log(`Verificando status do job ${jobId} (tentativa ${attempt}/${MAX_ATTEMPTS})`);
+    
     const headers: any = {
       Authorization: `Bearer ${authToken}`,
     };
@@ -210,7 +221,10 @@ export const checkProcessingStatus = async (
 
     const response = await axios.get<ProcessingStatus>(
       `https://api-contra-cheque-online.vercel.app/process-s3-upload/status/${jobId}`,
-      { headers }
+      { 
+        headers,
+        validateStatus: (status) => status === 200 || status === 304
+      }
     );
 
     // Se o status for 304 (Not Modified), retorna o status anterior
@@ -228,22 +242,34 @@ export const checkProcessingStatus = async (
     const retryAfter = response.headers['retry-after'] ? 
       parseInt(response.headers['retry-after']) * 1000 : backoffDelay;
 
+    console.log('Status recebido:', response.data);
+
     return {
       ...response.data,
       retryAfter,
       etag: response.headers['etag'],
-      attempt: attempt,
+      attempt,
       maxAttempts: MAX_ATTEMPTS
     };
   } catch (error: any) {
+    console.error('Erro ao verificar status:', error.response || error);
+
     if (error.message === 'NOT_MODIFIED') {
-      // Para respostas 304, usa backoff exponencial
       const backoffDelay = Math.min(
         BASE_DELAY * Math.pow(1.5, attempt - 1),
         MAX_DELAY
       );
       throw new Error(`NOT_MODIFIED:${backoffDelay}`);
     }
+
+    if (error.response?.status === 404) {
+      throw new Error('JOB_NOT_FOUND');
+    }
+
+    if (error.response?.status === 401) {
+      throw new Error('AUTH_ERROR');
+    }
+
     throw error;
   }
 };

@@ -132,21 +132,28 @@ const DashboardPage = () => {
           timeoutId = setTimeout(checkStatus, status.retryAfter || 3000);
         }
       } catch (err: any) {
-        if (err.message.startsWith('NOT_MODIFIED:')) {
-          const delay = parseInt(err.message.split(':')[1]);
-          setCurrentAttempt(prev => prev + 1);
-          timeoutId = setTimeout(checkStatus, delay);
+        if (err.message === 'JOB_NOT_FOUND') {
+          setError('O processo não foi encontrado no servidor. Por favor, tente fazer o upload novamente.');
+          setLoading(false);
+          return;
+        }
+
+        if (err.message === 'AUTH_ERROR') {
+          setError('Sua sessão expirou. Por favor, faça login novamente.');
+          setTimeout(() => {
+            window.location.href = '/master';
+          }, 2000);
           return;
         }
 
         if (err.message === 'MAX_ATTEMPTS_EXCEEDED') {
-          setError('Número máximo de tentativas excedido. Por favor, tente novamente.');
+          setError('O processo excedeu o número máximo de tentativas. Por favor, tente novamente.');
           setLoading(false);
           return;
         }
 
         console.error('Erro ao verificar status:', err);
-        setError('Erro ao verificar status do processamento.');
+        setError(err.message || 'Erro ao verificar status do processamento.');
         setLoading(false);
       }
     }
@@ -154,6 +161,7 @@ const DashboardPage = () => {
     if (jobId && jobStatus === 'processing') {
       if (!startTimeRef.current) {
         startTimeRef.current = Date.now();
+        console.log('Iniciando temporizador para o processo:', jobId);
       }
       checkStatus();
     }
