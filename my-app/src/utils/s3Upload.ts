@@ -228,9 +228,8 @@ export const checkProcessingStatus = async (
 
   try {
     console.log(`Verificando status do job ${jobId} (tentativa ${attempt}/${MAX_ATTEMPTS})`);
-    
-    const response = await axios.get<ProcessingStatus>(
-      `https://api-contra-cheque-online.vercel.app/process-s3-upload/status/${jobId}`,
+      const response = await axios.get<ProcessingStatus>(
+      `https://api-contra-cheque-online.vercel.app/status/${jobId}`,
       {
         headers: {
           Authorization: `Bearer ${authToken}`,
