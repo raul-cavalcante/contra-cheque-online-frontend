@@ -228,11 +228,16 @@ export const checkProcessingStatus = async (
 
   try {
     console.log(`Verificando status do job ${jobId} (tentativa ${attempt}/${MAX_ATTEMPTS})`);
-      const response = await axios.get<ProcessingStatus>(
-      `https://api-contra-cheque-online.vercel.app/status/${jobId}`,
+    
+    // Remove o prefixo 'process:' do jobId se existir
+    const cleanJobId = jobId.replace('process:', '');
+    
+    const response = await axios.get<ProcessingStatus>(
+      `https://api-contra-cheque-online.vercel.app/process-s3-upload/status/${cleanJobId}`,
       {
         headers: {
           Authorization: `Bearer ${authToken}`,
+          'If-None-Match': `"${Date.now()}"` // Evita cache
         }
       }
     );
@@ -242,6 +247,10 @@ export const checkProcessingStatus = async (
 
     // Calcula o próximo delay baseado no status atual
     const nextDelay = calculateNextDelay(status, currentDelay);
+
+    if (!status || !status.status) {
+      throw new Error('STATUS_INVALID');
+    }
 
     return {
       ...status,
@@ -258,6 +267,16 @@ export const checkProcessingStatus = async (
       throw new Error('AUTH_ERROR');
     }
 
+    if (error.response?.status === 304) {
+      // Se não houve mudança, retorna o status anterior com o próximo delay
+      return {
+        status: 'processing',
+        progress: 0,
+        message: 'Em processamento',
+        retryDelay: calculateNextDelay({ status: 'processing' }, currentDelay) / 1000
+      };
+    }
+
     throw error;
   }
 };
@@ -272,11 +291,25 @@ export const pollProcessingStatus = async (
 ): Promise<void> => {
   let attempt = 1;
   let currentDelay = MIN_DELAY;
+  let lastProgressTime = Date.now();
+  let lastProgress = 0;
   
   const checkStatusWithBackoff = async () => {
     try {
       const status = await checkProcessingStatus(jobId, authToken, attempt, currentDelay);
       
+      // Verifica se houve progresso
+      if (status.progress !== undefined && status.progress !== lastProgress) {
+        lastProgressTime = Date.now();
+        lastProgress = status.progress;
+      }
+      
+      // Verifica se o processamento está estagnado
+      const stallTime = Date.now() - lastProgressTime;
+      if (stallTime > 5 * 60 * 1000) { // 5 minutos sem progresso
+        throw new Error('PROCESSING_STALLED');
+      }
+
       switch (status.status) {
         case 'processing':
           onProgress(status);
@@ -287,20 +320,49 @@ export const pollProcessingStatus = async (
           break;
         
         case 'completed':
+          if (!status.result) {
+            onError(new Error('Resultado não encontrado no status completo'));
+            break;
+          }
           onComplete(status.result);
           break;
         
         case 'error':
           onError(new Error(status.error || 'Erro no processamento'));
           break;
+
+        default:
+          onError(new Error(`Status inválido: ${status.status}`));
+          break;
       }
     } catch (error: any) {
-      if (error.message === 'MAX_ATTEMPTS_EXCEEDED') {
-        onError(new Error('Número máximo de tentativas excedido'));
-        return;
+      const errorMessage = error.message || 'Erro desconhecido';
+      
+      switch (errorMessage) {
+        case 'MAX_ATTEMPTS_EXCEEDED':
+          onError(new Error('Número máximo de tentativas excedido'));
+          break;
+        
+        case 'JOB_NOT_FOUND':
+          onError(new Error('Job não encontrado'));
+          break;
+        
+        case 'AUTH_ERROR':
+          onError(new Error('Erro de autenticação - token inválido ou expirado'));
+          break;
+        
+        case 'PROCESSING_STALLED':
+          onError(new Error('Processamento paralisado - sem progresso por 5 minutos'));
+          break;
+        
+        case 'STATUS_INVALID':
+          onError(new Error('Resposta do servidor inválida'));
+          break;
+        
+        default:
+          onError(error instanceof Error ? error : new Error('Erro ao verificar status'));
+          break;
       }
-
-      onError(error instanceof Error ? error : new Error('Erro ao verificar status'));
     }
   };
 
