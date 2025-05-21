@@ -233,11 +233,10 @@ export const checkProcessingStatus = async (
     const cleanJobId = jobId.replace('process:', '');
     
     const response = await axios.get<ProcessingStatus>(
-      `https://api-contra-cheque-online.vercel.app/process-s3-upload/status/${cleanJobId}`,
+      `https://api-contra-cheque-online.vercel.app/status/${cleanJobId}`,
       {
         headers: {
-          Authorization: `Bearer ${authToken}`,
-          'If-None-Match': `"${Date.now()}"` // Evita cache
+          Authorization: `Bearer ${authToken}`
         }
       }
     );
@@ -266,14 +265,15 @@ export const checkProcessingStatus = async (
     if (error.response?.status === 401) {
       throw new Error('AUTH_ERROR');
     }
-
-    if (error.response?.status === 304) {
-      // Se não houve mudança, retorna o status anterior com o próximo delay
+    
+    // Para erros de rede, retorna um status processing para tentar novamente
+    if (error.code === 'ERR_NETWORK') {
+      console.log('Erro de rede, tentando novamente em breve...');
       return {
         status: 'processing',
         progress: 0,
-        message: 'Em processamento',
-        retryDelay: calculateNextDelay({ status: 'processing' }, currentDelay) / 1000
+        message: 'Em processamento (reconectando...)',
+        retryDelay: Math.min(currentDelay * 2, MAX_DELAY) / 1000 // Aumenta o delay em caso de erro de rede
       };
     }
 
