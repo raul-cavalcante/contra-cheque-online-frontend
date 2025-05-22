@@ -12,6 +12,9 @@ interface Admin {
   password: string;
 }
 
+// Tipo para resposta da URL pré-assinada
+interface PresignedUrlResponse { url: string }
+
 const UserDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -32,6 +35,7 @@ const UserDashboard = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   // Atualize o estado com o tipo correto
   const [admins, setAdmins] = useState<Admin[]>([]);
+  const [payslips, setPayslips] = useState<any[]>([]);
 
   // Função para obter os anos e meses disponíveis
   const fetchYearMonth = async () => {
@@ -72,8 +76,49 @@ const UserDashboard = () => {
     }
   };
 
+  // Função para buscar a lista de contracheques disponíveis
+  const fetchPayslips = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const cookies = parseCookies();
+      const token = cookies.auth_token;
+      if (!token) {
+        setError('Usuário não autenticado');
+        router.push('/');
+        return;
+      }
+      // Ajuste o endpoint conforme seu backend
+      const response = await axios.get('https://api-contra-cheque-online.vercel.app/contra-cheques', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (Array.isArray(response.data)) {
+        setPayslips(response.data);
+        // Atualiza anos e meses disponíveis
+        const uniqueYears = [...new Set(response.data.map((item) => item.year))].sort((a, b) => b - a);
+        setAnos(uniqueYears);
+        setMeses([]); // Limpa meses até selecionar ano
+      } else {
+        setError('Formato de resposta inválido');
+      }
+    } catch (err: any) {
+      setError('Erro ao buscar contracheques');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Atualiza meses disponíveis ao selecionar ano
+  useEffect(() => {
+    if (selectedYear) {
+      const mesesDoAno = payslips.filter((p) => p.year === selectedYear).map((p) => p.month);
+      setMeses([...new Set(mesesDoAno)].sort((a, b) => a - b));
+    }
+  }, [selectedYear, payslips]);
+
   useEffect(() => {
     fetchYearMonth();
+    fetchPayslips();
   }, []);
 
   const handleChangePassword = async () => {
@@ -321,42 +366,35 @@ const UserDashboard = () => {
                       try {
                         setError('');
                         setLoading(true);
-
                         const cookies = parseCookies();
                         const token = cookies.auth_token;
-
                         if (!token) {
                           setError('Usuário não autenticado');
                           router.push('/');
                           return;
                         }
-
-                        const response = await axios.get('https://api-contra-cheque-online.vercel.app/contra-cheques', {
-                          headers: {
-                            Authorization: `Bearer ${token}`,
-                          },
-                        });
-
-                        const data = response.data;
-                        if (Array.isArray(data)) {
-                          const selectedFile = data.find(
-                            (item) => item.year === selectedYear && item.month === selectedMonth
-                          );
-
-                          if (selectedFile && selectedFile.fileUrl) {
-                            const link = document.createElement('a');
-                            link.href = selectedFile.fileUrl;
-                            link.download = selectedFile.fileUrl.split('/').pop() || `${selectedYear}-${selectedMonth}.pdf`;
-                            link.click();
-                          } else {
-                            setError('Arquivo não encontrado para o período selecionado');
-                          }
+                        // Busca o contracheque selecionado
+                        const selectedPayslip = payslips.find(
+                          (item) => item.year === selectedYear && item.month === selectedMonth
+                        );
+                        if (!selectedPayslip) {
+                          setError('Arquivo não encontrado para o período selecionado');
+                          setLoading(false);
+                          return;
+                        }
+                        // Solicita a URL pré-assinada ao backend
+                        const { cpf, uuid } = selectedPayslip;
+                        const presignedRes = await axios.get<PresignedUrlResponse>(
+                          `https://api-contra-cheque-online.vercel.app/api/payslip/presigned-url?cpf=${cpf}&uuid=${uuid}`,
+                          { headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        if (presignedRes.data && typeof presignedRes.data.url === 'string') {
+                          window.open(presignedRes.data.url, '_blank');
                         } else {
-                          setError('Formato de resposta inválido');
+                          setError('Não foi possível obter a URL de download.');
                         }
                       } catch (err: any) {
-                        console.error(err);
-                        setError('Erro ao buscar o arquivo');
+                        setError('Erro ao obter a URL de download');
                       } finally {
                         setLoading(false);
                       }
